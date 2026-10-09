@@ -1,5 +1,6 @@
 # Start Jarvis with the keys from .env loaded into the process environment.
 # The server does not read .env by itself. Keys are never printed.
+param([switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
@@ -19,4 +20,6 @@ if (-not $env:GEMINI_API_KEY) {
     Write-Host 'GEMINI_API_KEY is empty in .env' -ForegroundColor Yellow
 }
 
-& (Join-Path $PSScriptRoot '.venv\Scripts\jarvis.exe') gui
+$jarvisArgs = @('gui')
+if ($NoBrowser) { $jarvisArgs += '--no-browser' }
+& (Join-Path $PSScriptRoot '.venv\Scripts\jarvis.exe') @jarvisArgs
