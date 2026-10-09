@@ -14,7 +14,7 @@ import { transcribeAudio } from '../lib/api';
 // 7s with "nothing heard", which looks identical to the call being stuck).
 const SPEECH_RMS_THRESHOLD = 0.035;
 const SILENCE_RMS_THRESHOLD = 0.03;
-const SILENCE_HOLD_MS = 700;
+const SILENCE_HOLD_MS = 550;
 const STARTUP_SILENCE_MS = 7000;
 const MAX_TURN_MS = 15000;
 const NOISE_FLOOR_CALIBRATION_MS = 400;
@@ -58,7 +58,7 @@ async function preferConfiguredMic(
 const BARGE_IN_MIN_LEVEL = 0.15;
 const BARGE_IN_FRAMES = 10;
 const BARGE_IN_GRACE_MS = 700;
-const POST_SPEECH_PAUSE_MS = 400;
+const POST_SPEECH_PAUSE_MS = 250;
 
 export const JARVIS_CALL_PERSONA =
   'Eres Jarvis, el asistente de IA personal al estilo del mayordomo de Tony ' +
