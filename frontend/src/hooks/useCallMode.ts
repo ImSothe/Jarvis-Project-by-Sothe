@@ -18,6 +18,43 @@ const SILENCE_HOLD_MS = 700;
 const STARTUP_SILENCE_MS = 7000;
 const MAX_TURN_MS = 15000;
 const NOISE_FLOOR_CALIBRATION_MS = 400;
+// The browser's "default" input is often a virtual device (e.g. NVIDIA
+// Broadcast) that feeds static. Prefer a real mic whose label matches this
+// regex; override with localStorage 'jarvis.preferredMic' (a regex string).
+const DEFAULT_PREFERRED_MIC = 'hyperx|quadcast';
+
+async function preferConfiguredMic(
+  stream: MediaStream,
+  constraints: MediaTrackConstraints,
+): Promise<MediaStream> {
+  try {
+    let pattern = DEFAULT_PREFERRED_MIC;
+    try {
+      pattern = localStorage.getItem('jarvis.preferredMic') || pattern;
+    } catch {
+      /* storage unavailable: keep default */
+    }
+    const re = new RegExp(pattern, 'i');
+    const track = stream.getAudioTracks()[0];
+    if (!track || re.test(track.label)) return stream;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const target = devices.find(
+      (d) => d.kind === 'audioinput' && re.test(d.label)
+        && d.deviceId !== 'default' && d.deviceId !== 'communications',
+    );
+    if (!target) return stream;
+    const next = await navigator.mediaDevices.getUserMedia({
+      audio: { ...constraints, deviceId: { exact: target.deviceId } },
+    });
+    stream.getTracks().forEach((t) => t.stop());
+    console.log('[jarvis-call] switched microphone to:', target.label);
+    return next;
+  } catch (err) {
+    console.warn('[jarvis-call] could not switch microphone, using default', err);
+    return stream;
+  }
+}
+
 const BARGE_IN_MIN_LEVEL = 0.15;
 const BARGE_IN_FRAMES = 10;
 const BARGE_IN_GRACE_MS = 700;
@@ -391,9 +428,9 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       // (Reports of flat-zero levels turned out not to be caused by
       // noiseSuppression/autoGainControl — see the track/AudioContext
       // diagnostics logged right below instead.)
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      const audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+      const firstStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      const stream = await preferConfiguredMic(firstStream, audioConstraints);
       console.log('[jarvis-call] microphone permission granted');
       for (const track of stream.getAudioTracks()) {
         // Flat-zero levels with no error anywhere usually trace back to one

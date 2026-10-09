@@ -51,7 +51,33 @@ export function shouldAutoplayFinishedReply(
     && lastMessage.id !== autoSpokenId;
 }
 
+/**
+ * Last-resort voice: the browser's own speechSynthesis. Used when the server
+ * cannot synthesize (quota, network), so a call never goes silent. No quota,
+ * no server round-trip; quality depends on the OS voices installed.
+ */
+function speakWithBrowserVoice(text: string, onEnd: () => void): boolean {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
+  try {
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'es-ES';
+    const voices = window.speechSynthesis.getVoices();
+    const es = voices.find((v) => v.lang.toLowerCase().startsWith('es'));
+    if (es) utter.voice = es;
+    utter.onend = onEnd;
+    utter.onerror = onEnd;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utter);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function teardown(): void {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
   if (audio) {
     // Detach first: clearing src re-runs the media load algorithm, which fails
     // on an empty source and dispatches an `error` event. With the handler
@@ -139,6 +165,14 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       if (mine !== token) return;
       if (err instanceof DOMException && err.name === 'AbortError') return;
       teardown();
+      const usedFallback = speakWithBrowserVoice(trimmed, () => {
+        if (mine === token) set({ state: 'idle', speakingId: null });
+      });
+      if (usedFallback) {
+        console.warn('[tts] server synthesis failed, using browser voice:', err);
+        set({ state: 'speaking', speakingId: id, error: null, errorId: null });
+        return;
+      }
       set({
         state: 'idle',
         speakingId: null,
