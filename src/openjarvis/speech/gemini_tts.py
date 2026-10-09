@@ -42,11 +42,19 @@ class GeminiTTSBackend(TTSBackend):
 
     backend_id = "gemini_tts"
 
-    def __init__(self, *, api_key: str = "", model: str = "gemini-3.8-flash-tts") -> None:
+    # Tried in order; each model has its own free-tier quota, so a 429 on one
+    # falls through to the next instead of leaving the call silent.
+    _FALLBACK_MODELS = (
+        "gemini-3.8-flash-lite-tts",
+        "gemini-3.1-flash-tts-preview",
+        "gemini-3.8-flash-tts",
+    )
+
+    def __init__(self, *, api_key: str = "", model: str = "") -> None:
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get(
             "GOOGLE_API_KEY", ""
         )
-        self._model = model
+        self._model = model or os.environ.get("GEMINI_TTS_MODEL", self._FALLBACK_MODELS[0])
         self._client = None
         if self._api_key and genai is not None:
             self._client = genai.Client(api_key=self._api_key)
@@ -63,30 +71,35 @@ class GeminiTTSBackend(TTSBackend):
             raise RuntimeError("Gemini client not initialized (missing API key?)")
 
         voice = voice_id or "Kore"
-        response = self._client.models.generate_content(
-            model=self._model,
-            contents=text,
-            config=genai_types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=genai_types.SpeechConfig(
-                    voice_config=genai_types.VoiceConfig(
-                        prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
-                            voice_name=voice
-                        )
+        config = genai_types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=genai_types.SpeechConfig(
+                voice_config=genai_types.VoiceConfig(
+                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
+                        voice_name=voice
                     )
-                ),
+                )
             ),
         )
-        part = response.candidates[0].content.parts[0]
-        audio_bytes = part.inline_data.data
-
-        return TTSResult(
-            audio=audio_bytes,
-            format="wav",
-            voice_id=voice,
-            sample_rate=_wav_sample_rate(audio_bytes),
-            metadata={"backend": "gemini_tts", "model": self._model},
-        )
+        models = [self._model] + [m for m in self._FALLBACK_MODELS if m != self._model]
+        last_err: Exception | None = None
+        for model in models:
+            try:
+                response = self._client.models.generate_content(
+                    model=model, contents=text, config=config
+                )
+                audio_bytes = response.candidates[0].content.parts[0].inline_data.data
+            except Exception as exc:  # quota / transient errors: try next model
+                last_err = exc
+                continue
+            return TTSResult(
+                audio=audio_bytes,
+                format="wav",
+                voice_id=voice,
+                sample_rate=_wav_sample_rate(audio_bytes),
+                metadata={"backend": "gemini_tts", "model": model},
+            )
+        raise last_err if last_err else RuntimeError("Gemini TTS failed")
 
     def available_voices(self) -> List[str]:
         return list(_VOICES)
