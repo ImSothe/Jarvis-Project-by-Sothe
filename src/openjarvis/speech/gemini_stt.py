@@ -31,8 +31,10 @@ class GeminiSpeechBackend(SpeechBackend):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3.8-flash",
+        model: str = "",
     ) -> None:
+        # Lite model: ~1s per turn vs 5-7s for gemini-3.8-flash (measured).
+        model = model or os.environ.get("GEMINI_STT_MODEL", "gemini-3.5-flash-lite")
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get(
             "GOOGLE_API_KEY", ""
         )

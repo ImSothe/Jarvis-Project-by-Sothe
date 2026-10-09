@@ -57,7 +57,8 @@ const CLOUD_PROVIDERS: CloudProvider[] = [
     name: 'Google',
     envKey: 'GEMINI_API_KEY',
     models: [
-      { id: 'gemini-3.8-flash', desc: 'Gemini 3.8 Flash — fast, works on the free tier' },
+      { id: 'gemini-3.5-flash-lite', desc: 'Gemini 3.5 Flash Lite — fastest, best for voice calls' },
+      { id: 'gemini-3.8-flash', desc: 'Gemini 3.8 Flash — smarter but slower (~6s per reply)' },
       { id: 'gemini-3.8-pro', desc: 'Gemini 3.8 Pro — most capable (needs billing enabled)' },
     ],
   },
