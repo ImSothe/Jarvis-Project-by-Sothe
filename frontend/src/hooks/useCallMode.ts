@@ -18,6 +18,10 @@ const SILENCE_HOLD_MS = 700;
 const STARTUP_SILENCE_MS = 7000;
 const MAX_TURN_MS = 15000;
 const NOISE_FLOOR_CALIBRATION_MS = 400;
+const BARGE_IN_MIN_LEVEL = 0.15;
+const BARGE_IN_FRAMES = 10;
+const BARGE_IN_GRACE_MS = 700;
+const POST_SPEECH_PAUSE_MS = 400;
 
 export const JARVIS_CALL_PERSONA =
   'Eres Jarvis, el asistente de IA personal al estilo del mayordomo de Tony ' +
@@ -174,12 +178,18 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       if (!analyser) return; // no mic graph — fall back to natural end only
       const data = new Uint8Array(analyser.fftSize);
       let speechFrames = 0;
+      const bargeStartedAt = Date.now();
+      // Speakers leak Jarvis's own voice into the mic (echo cancellation is weak
+      // on virtual mics), so barge-in must be well above the normal speech
+      // threshold, sustained, and ignored during the first moments of playback.
+      const bargeThreshold = Math.max(BARGE_IN_MIN_LEVEL, speechThreshold() * 3);
       const tick = () => {
         if (settled || !activeRef.current) return;
         analyser.getByteTimeDomainData(data);
-        if (rms(data) * 4 > speechThreshold()) {
+        const inGrace = Date.now() - bargeStartedAt < BARGE_IN_GRACE_MS;
+        if (!inGrace && Math.min(1, rms(data) * 4) > bargeThreshold) {
           speechFrames += 1;
-          if (speechFrames > 2) {
+          if (speechFrames > BARGE_IN_FRAMES) {
             console.log('[jarvis-call] barge-in detected — cutting Jarvis off');
             finish('bargein');
             return;
@@ -355,6 +365,8 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
         useTtsStore.getState().stop(); // cut Jarvis off immediately
         useCallStore.getState().setLevel(0);
       }
+      // Let the room echo of Jarvis's last words die before the mic re-opens.
+      await new Promise((r) => setTimeout(r, POST_SPEECH_PAUSE_MS));
       // Either way, loop back to 'listening' next iteration — on a natural
       // end that's the normal turn-taking; on a barge-in it's the point of
       // the feature (the words spoken during the cut itself aren't
