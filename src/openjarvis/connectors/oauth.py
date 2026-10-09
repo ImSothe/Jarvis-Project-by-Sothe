@@ -71,6 +71,19 @@ GOOGLE_ALL_SCOPES: List[str] = [
     "https://www.googleapis.com/auth/tasks.readonly",
 ]
 
+# Least-privilege mode: JARVIS_GOOGLE_SCOPES=readonly asks only for read access
+# (Gmail, Calendar, Tasks only). Jarvis then cannot send, trash,
+# label or create/modify events, even if a prompt or an email tells it to.
+if os.environ.get("JARVIS_GOOGLE_SCOPES", "").strip().lower() == "readonly":
+    GOOGLE_ALL_SCOPES = [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/tasks.readonly",
+    ]
+
 OAUTH_PROVIDERS: Dict[str, OAuthProvider] = {
     "google": OAuthProvider(
         name="google",
