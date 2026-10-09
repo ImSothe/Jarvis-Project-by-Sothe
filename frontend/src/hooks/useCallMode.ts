@@ -13,8 +13,8 @@ import { transcribeAudio } from '../lib/api';
 // silently never triggered on another (recordTurn would just time out every
 // 7s with "nothing heard", which looks identical to the call being stuck).
 const SPEECH_RMS_THRESHOLD = 0.035;
-const SILENCE_RMS_THRESHOLD = 0.02;
-const SILENCE_HOLD_MS = 900;
+const SILENCE_RMS_THRESHOLD = 0.03;
+const SILENCE_HOLD_MS = 700;
 const STARTUP_SILENCE_MS = 7000;
 const MAX_TURN_MS = 15000;
 const NOISE_FLOOR_CALIBRATION_MS = 400;
@@ -71,7 +71,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
     [],
   );
   const silenceThreshold = useCallback(
-    () => Math.max(SILENCE_RMS_THRESHOLD, noiseFloorRef.current * 1.4),
+    () => Math.max(SILENCE_RMS_THRESHOLD, noiseFloorRef.current * 1.6),
     [],
   );
 
@@ -442,7 +442,8 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
             requestAnimationFrame(sample);
           } else {
             const avg = samples.reduce((a, b) => a + b, 0) / Math.max(1, samples.length);
-            noiseFloorRef.current = avg;
+            // Same units as `level` (rms * 4), which the thresholds are compared against.
+            noiseFloorRef.current = Math.min(1, avg * 4);
             console.log('[jarvis-call] noise floor calibrated:', avg.toFixed(4));
             resolve();
           }
