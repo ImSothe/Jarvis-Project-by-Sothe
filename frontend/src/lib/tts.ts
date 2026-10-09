@@ -132,7 +132,9 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       };
 
       await el.play();
-      if (mine === token) set({ state: 'speaking', speakingId: id });
+      // A short clip can finish before play() resolves; onended already set
+      // 'idle' then, so re-marking 'speaking' would leave the call stuck.
+      if (mine === token && !el.ended) set({ state: 'speaking', speakingId: id });
     } catch (err) {
       if (mine !== token) return;
       if (err instanceof DOMException && err.name === 'AbortError') return;
