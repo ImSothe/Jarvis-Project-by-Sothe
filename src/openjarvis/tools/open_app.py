@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from openjarvis.core.config import DEFAULT_CONFIG_DIR
 from openjarvis.core.registry import ToolRegistry
@@ -32,7 +33,7 @@ from openjarvis.tools._stubs import BaseTool, ToolSpec
 APPS_FILE = DEFAULT_CONFIG_DIR / "apps.json"
 
 # Only these deep-link schemes may be launched through an apps.json "uri" entry.
-_LAUNCHER_SCHEMES = ("steam", "com.epicgames.launcher")
+_LAUNCHER_SCHEMES = ("steam", "com.epicgames.launcher", "spotify")
 
 
 def _load_apps() -> Dict[str, Dict[str, Any]]:
@@ -75,6 +76,10 @@ class OpenAppTool(BaseTool):
                         "type": "string",
                         "description": "Optional http(s) URL, browsers only.",
                     },
+                    "query": {
+                        "type": "string",
+                        "description": "Short search text, only for entries that take one (e.g. 'spotify busqueda').",
+                    },
                 },
                 "required": ["app"],
             },
@@ -101,6 +106,18 @@ class OpenAppTool(BaseTool):
 
         entry = apps[key]
         uri = str(entry.get("uri", ""))
+        template = str(entry.get("uri_template", ""))
+        if template:
+            # e.g. "spotify:search:{q}": the model only supplies a short, sanitized query.
+            q = re.sub(r"[^\w\s.\-&'ñÑáéíóúÁÉÍÓÚüÜ]", " ", str(params.get("query", "") or "")).strip()
+            q = re.sub(r"\s+", " ", q)[:60]
+            if not q:
+                return ToolResult(
+                    tool_name=self.tool_id,
+                    content=f"'{key}' needs a short search text in 'query'.",
+                    success=False,
+                )
+            uri = template.replace("{q}", quote(q, safe=""))
         if uri:
             # Game-launcher deep links (Steam / Epic), fixed in apps.json.
             if urlparse(uri).scheme not in _LAUNCHER_SCHEMES or params.get("url"):
@@ -119,7 +136,8 @@ class OpenAppTool(BaseTool):
                 )
             return ToolResult(
                 tool_name=self.tool_id,
-                content=f"Started {key}.",
+                content=(f"Launched {key} (the request was sent to its launcher; I cannot "
+                         "see whether the window or game actually opened)."),
                 success=True,
                 metadata={"app": key},
             )
@@ -168,7 +186,8 @@ class OpenAppTool(BaseTool):
             )
         return ToolResult(
             tool_name=self.tool_id,
-            content=f"Started {key}.",
+            content=(f"Launched {key} (process started; I cannot see whether its window "
+                     "actually appeared)."),
             success=True,
             metadata={"app": key},
         )

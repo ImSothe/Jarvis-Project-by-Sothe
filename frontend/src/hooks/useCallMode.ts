@@ -18,6 +18,45 @@ const SILENCE_HOLD_MS = 550;
 const STARTUP_SILENCE_MS = 7000;
 const MAX_TURN_MS = 15000;
 const NOISE_FLOOR_CALIBRATION_MS = 400;
+// Noise rejection. A real utterance needs sustained voice, not a click.
+const MIN_VOICED_MS = 250;
+const MIN_SPEECH_RUN_MS = 180;
+const SPEECH_RUN_GAP_MS = 90; // short gaps between syllables still count as one run
+
+const NOISE_WORDS = new Set([
+  'eh', 'ehm', 'em', 'mm', 'mmm', 'hmm', 'hm', 'ah', 'oh', 'uh', 'uf', 'ey', 'psst', 'aja', 'ajá',
+]);
+// Typical speech-to-text hallucinations on silence or keyboard noise.
+const NOISE_PATTERNS = [
+  /gracias por (ver|vuestra|su atenci)/i,
+  /suscr[ií]b/i,
+  /subt[ií]tulos? (por|realizados|de)/i,
+  /amara\.org/i,
+  /^[\[<(].*[\]>)]$/,
+  /^(m[uú]sica|aplausos|risas|ruido|silencio)\.?$/i,
+];
+
+/** True when a transcript is clearly not something the user said to Jarvis. */
+export function isNoiseTranscript(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (NOISE_PATTERNS.some((p) => p.test(t))) return true;
+  const words = t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return true;
+  return words.every((w) => NOISE_WORDS.has(w) || w.length <= 1);
+}
+
+/** The model may answer with a silence marker when there is nothing to say. */
+export function isSilenceReply(reply: string): boolean {
+  return /^\s*[\[(]?\s*silencio\s*[\])]?\s*\.?\s*$/i.test(reply);
+}
+
 // The browser's "default" input is often a virtual device (e.g. NVIDIA
 // Broadcast) that feeds static. Prefer a real mic whose label matches this
 // regex; override with localStorage 'jarvis.preferredMic' (a regex string).
@@ -255,14 +294,30 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       const recorder = new MediaRecorder(stream);
       const chunks: Blob[] = [];
       let gotSpeech = false;
+      let forced = false;
+      // Voiced-time bookkeeping: a key click or mouse tap is a spike of a few
+      // milliseconds, real speech is a sustained run. Without this, any noise
+      // above the threshold was sent to STT and Jarvis "answered" it.
+      let voicedMs = 0;
+      let runStart: number | null = null;
+      let lastVoicedAt: number | null = null;
+      let longestRunMs = 0;
+      let lastTickAt: number | null = null;
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
       };
       recorder.onstop = () => {
         stopLevelLoop();
         forceStopRef.current = null;
+        const looksLikeSpeech = voicedMs >= MIN_VOICED_MS && longestRunMs >= MIN_SPEECH_RUN_MS;
+        if (gotSpeech && !forced && !looksLikeSpeech) {
+          console.log('[jarvis-call] ignored noise (too short to be speech)', {
+            voicedMs: Math.round(voicedMs),
+            longestRunMs: Math.round(longestRunMs),
+          });
+        }
         resolve(
-          gotSpeech && chunks.length
+          gotSpeech && chunks.length && (forced || looksLikeSpeech)
             ? new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
             : null,
         );
@@ -295,11 +350,18 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
           console.log('[jarvis-call] level', level.toFixed(4), hasSpoken ? '(speaking)' : '(waiting for speech)');
         }
 
+        const dt = lastTickAt === null ? 0 : Math.min(100, now - lastTickAt);
+        lastTickAt = now;
+
         if (level > speechCutoff) {
           if (!hasSpoken) console.log('[jarvis-call] audio chunk captured — speech detected');
           hasSpoken = true;
           gotSpeech = true;
           silenceSince = null;
+          voicedMs += dt;
+          if (lastVoicedAt === null || now - lastVoicedAt > SPEECH_RUN_GAP_MS) runStart = now;
+          lastVoicedAt = now;
+          if (runStart !== null) longestRunMs = Math.max(longestRunMs, now - runStart);
         } else if (hasSpoken && level < silenceCutoff) {
           if (silenceSince === null) silenceSince = now;
           else if (now - silenceSince > SILENCE_HOLD_MS) {
@@ -328,6 +390,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       forceStopRef.current = () => {
         console.log('[jarvis-call] manual force-send (Space) — sending whatever was captured');
         gotSpeech = true;
+        forced = true;
         if (recorder.state !== 'inactive') recorder.stop();
       };
       tick();
@@ -363,6 +426,10 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       }
       if (!activeRef.current) break;
       if (!text) continue;
+      if (isNoiseTranscript(text)) {
+        console.log('[jarvis-call] ignored noise transcript:', JSON.stringify(text));
+        continue;
+      }
 
       let reply = '';
       try {
@@ -377,6 +444,10 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       }
       if (!activeRef.current) break;
       if (!reply) continue;
+      if (isSilenceReply(reply)) {
+        console.log('[jarvis-call] model chose silence, not speaking');
+        continue;
+      }
 
       useCallStore.getState().setState('speaking');
       console.log('[jarvis-call] speaking...');
