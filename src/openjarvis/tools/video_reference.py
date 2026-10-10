@@ -1,4 +1,4 @@
-﻿"""Study viral videos: analyze one by link, or find recent hits on YouTube.
+"""Study viral videos: analyze one by link, or find recent hits on YouTube.
 
 ``analyze_video``  downloads only the AUDIO of a public video into a temp
 folder, transcribes it, returns facts (stats, caption, hook, transcript) and
