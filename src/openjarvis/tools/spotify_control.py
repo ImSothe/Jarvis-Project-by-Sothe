@@ -143,21 +143,29 @@ def _start_desktop_app() -> None:
 
 
 def _pick_device() -> Tuple[str, str]:
-    """Return (device_id, name), starting the desktop app and waiting if needed."""
+    """Return (device_id, name) for playback.
+
+    Always the PC's own Spotify app (type "Computer"), even if another device
+    such as a TV is the last active one. If the PC app is not running we start
+    it and wait. Never falls back to a TV or speaker: playing on a Connect
+    device in another room would be a nasty surprise.
+    """
     deadline = time.time() + _DEVICE_WAIT_S
     started = False
     while True:
         devs = [d for d in _devices() if d.get("id") and not d.get("is_restricted")]
-        if devs:
-            active = next((d for d in devs if d.get("is_active")), None)
-            computer = next((d for d in devs if str(d.get("type", "")).lower() == "computer"), None)
-            chosen = active or computer or devs[0]
+        chosen = next((d for d in devs if str(d.get("type", "")).lower() == "computer"), None)
+        if chosen:
             return chosen["id"], chosen.get("name", "device")
         if not started:
             _start_desktop_app()
             started = True
         if time.time() >= deadline:
-            raise SpotifyError("I could not find an active Spotify device. Open Spotify and try again.")
+            others = ", ".join(f"{d.get('name')} ({d.get('type')})" for d in devs) or "none"
+            raise SpotifyError(
+                "The Spotify app on the PC did not show up as a device, so I did not play anything "
+                f"(other devices seen: {others}). Open Spotify on the PC and try again."
+            )
         time.sleep(2)
 
 
