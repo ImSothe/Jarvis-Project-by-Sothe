@@ -31,6 +31,9 @@ from openjarvis.tools._stubs import BaseTool, ToolSpec
 
 APPS_FILE = DEFAULT_CONFIG_DIR / "apps.json"
 
+# Only these deep-link schemes may be launched through an apps.json "uri" entry.
+_LAUNCHER_SCHEMES = ("steam", "com.epicgames.launcher")
+
 
 def _load_apps() -> Dict[str, Dict[str, Any]]:
     try:
@@ -97,6 +100,30 @@ class OpenAppTool(BaseTool):
             )
 
         entry = apps[key]
+        uri = str(entry.get("uri", ""))
+        if uri:
+            # Game-launcher deep links (Steam / Epic), fixed in apps.json.
+            if urlparse(uri).scheme not in _LAUNCHER_SCHEMES or params.get("url"):
+                return ToolResult(
+                    tool_name=self.tool_id,
+                    content=f"'{key}' has an invalid launcher entry.",
+                    success=False,
+                )
+            try:
+                os.startfile(uri)  # type: ignore[attr-defined]  # noqa: S606
+            except OSError as exc:
+                return ToolResult(
+                    tool_name=self.tool_id,
+                    content=f"Could not start '{key}': {exc}",
+                    success=False,
+                )
+            return ToolResult(
+                tool_name=self.tool_id,
+                content=f"Started {key}.",
+                success=True,
+                metadata={"app": key},
+            )
+
         exe = str(entry.get("path", ""))
         if not exe or not os.path.exists(exe):
             return ToolResult(
