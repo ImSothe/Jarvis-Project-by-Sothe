@@ -178,6 +178,7 @@ class OpenAppTool(BaseTool):
                 [exe, *args],
                 shell=False,
                 close_fds=True,
+                cwd=(str(entry.get("cwd")) if entry.get("cwd") and os.path.isdir(str(entry.get("cwd"))) else None),
                 creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | NEW_PROCESS_GROUP
             )
         except OSError as exc:
