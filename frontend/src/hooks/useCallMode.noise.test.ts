@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { asksQuestion, isNameOnly, isNoiseTranscript, isSilenceReply, judgeSpeech, looksLikeEcho, mentionsJarvis } from './useCallMode';
+import {
+  isNameOnly,
+  isNoiseTranscript,
+  isSilenceReply,
+  judgeSpeech,
+  looksLikeEcho,
+  mentionsJarvis,
+  startsWithJarvis,
+} from './useCallMode';
 
 describe('isNoiseTranscript', () => {
   it.each([
@@ -25,6 +33,7 @@ describe('isSilenceReply', () => {
     expect(isSilenceReply(r)).toBe(false);
   });
 });
+
 describe('mentionsJarvis', () => {
   it.each([
     'Jarvis abre Spotify', 'oye jarvis, dime algo', 'Yarvis pon música', 'harvis', 'Jarbis, qué hora es',
@@ -40,12 +49,19 @@ describe('mentionsJarvis', () => {
     expect(mentionsJarvis(text)).toBe(false);
   });
 });
-describe('asksQuestion', () => {
-  it.each(['¿Qué quieres escuchar?', 'Dime, ¿qué tal el día? ', '¿Seguro?"', 'Vale, ¿lo grabamos hoy?'])('is a question: %j', (r) => {
-    expect(asksQuestion(r)).toBe(true);
+
+describe('startsWithJarvis', () => {
+  it.each([
+    'Jarvis, ponme Residente', 'jarvis abre Spotify', 'Oye Jarvis qué hora es', 'Eh, Jarvis, dime', 'Yarvis pon música', 'JARVIS',
+  ])('starts with the name: %j', (text) => {
+    expect(startsWithJarvis(text)).toBe(true);
   });
-  it.each(['Hecho, crack.', 'Reproduciendo a Residente.', '¿Qué tal? Ya está.', ''])('is not a question: %j', (r) => {
-    expect(asksQuestion(r)).toBe(false);
+
+  it.each([
+    'ponme Residente, Jarvis', 'tío es que le dije a Jarvis que no', 'abre Spotify por favor jarvis',
+    'esto es un reel', 'a mí eso no me parece bien Jarvis', '',
+  ])('the name is not at the start: %j', (text) => {
+    expect(startsWithJarvis(text)).toBe(false);
   });
 });
 
@@ -65,7 +81,7 @@ describe('looksLikeEcho', () => {
 });
 
 describe('judgeSpeech (the rule that stops reels and friends)', () => {
-  const base = { now: 100000, engagedUntil: 0, lastReply: '', requireName: true };
+  const base = { now: 100000, pendingNameUntil: 0, lastReply: '', requireName: true };
 
   it('ignores a whole reel or a chat with a friend, utterance after utterance', () => {
     const reel = [
@@ -73,18 +89,25 @@ describe('judgeSpeech (the rule that stops reels and friends)', () => {
       'no te olvides de darle like y suscribirte al canal',
       'tío es que me dijo que no iba a venir hoy',
       'jajaja qué fuerte, y entonces qué hiciste',
+      'oye, le comenté a Jarvis lo del vídeo y le pareció bien',
     ];
     for (const line of reel) expect(judgeSpeech(line, base)).toBe('not-addressed');
   });
 
-  it('accepts anything that says the name', () => {
+  it('accepts only sentences that start with the name', () => {
     expect(judgeSpeech('Jarvis, ponme Residente', base)).toBe('accept');
     expect(judgeSpeech('oye yarvis qué hora es', base)).toBe('accept');
+    expect(judgeSpeech('ponme Residente, Jarvis', base)).toBe('not-addressed');
   });
 
-  it('accepts speech inside an open window, rejects it after it closes', () => {
-    expect(judgeSpeech('sí, ponla', { ...base, engagedUntil: base.now + 5000 })).toBe('accept');
-    expect(judgeSpeech('sí, ponla', { ...base, engagedUntil: base.now - 1 })).toBe('not-addressed');
+  it('has no open window: without the name there is no answer, even right after a question', () => {
+    expect(judgeSpeech('sí, ponla', base)).toBe('not-addressed');
+    expect(judgeSpeech('vale, y ahora el siguiente', { ...base, lastReply: '¿Quieres que ponga otra?' })).toBe('not-addressed');
+  });
+
+  it('after he said only the name, the next utterance continues it, but only for a few seconds', () => {
+    expect(judgeSpeech('ponme Residente', { ...base, pendingNameUntil: base.now + 3000 })).toBe('continuation');
+    expect(judgeSpeech('ponme Residente', { ...base, pendingNameUntil: base.now - 1 })).toBe('not-addressed');
   });
 
   it('treats his own words coming back as an echo, even if they contain the name', () => {
@@ -92,17 +115,22 @@ describe('judgeSpeech (the rule that stops reels and friends)', () => {
     expect(judgeSpeech('Soy Jarvis, hoy toca grabar', { ...base, lastReply })).toBe('echo');
   });
 
-  it('lets everything through when the name requirement is switched off', () => {
+  it('lets everything through only when the name requirement is switched off', () => {
     expect(judgeSpeech('tío es que me dijo que no venía', { ...base, requireName: false })).toBe('accept');
   });
 });
+
 describe('isNameOnly', () => {
   it.each(['Jarvis', 'Jarvis.', 'oye Jarvis', 'Eh, Jarvis', 'hola Jarvis', 'vale yarvis', 'Jarvis, dime'])(
     'is only a call: %j',
-    (text) => { expect(isNameOnly(text)).toBe(true); },
+    (text) => {
+      expect(isNameOnly(text)).toBe(true);
+    },
   );
   it.each(['Jarvis, ponme Residente', 'oye Jarvis qué hora es', 'Jarvis abre Spotify', 'hola qué tal', 'dime algo', ''])(
     'is a real request or not a call: %j',
-    (text) => { expect(isNameOnly(text)).toBe(false); },
+    (text) => {
+      expect(isNameOnly(text)).toBe(false);
+    },
   );
 });

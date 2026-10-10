@@ -56,17 +56,13 @@ export function isNoiseTranscript(text: string): boolean {
   return words.every((w) => NOISE_WORDS.has(w) || w.length <= 1);
 }
 
-// Only react when addressed. Audio from reels, videos or other people would
-// otherwise be transcribed and answered. Strict rules:
-//  - every utterance must say the assistant's name ("Jarvis");
-//  - exception 1: a short window right after pressing the call button;
-//  - exception 2: ONE answer, within a few seconds, right after Jarvis asked a question.
-// A window is consumed by the turn it accepts; it is never extended by accepted
-// speech (extending it let a reel or a friend keep Jarvis talking forever).
-const FIRST_TURN_WINDOW_MS = 6000;
-const FOLLOWUP_WINDOW_MS = 6000;
-// Saying just the name opens the mic for the next sentence (like a wake word).
-const NAME_ONLY_WINDOW_MS = 10000;
+// Only react when addressed, and only when the sentence STARTS with the name.
+// Audio from reels, videos or other people would otherwise be transcribed and
+// answered. There are no open windows: not after pressing the button, not after a
+// question from Jarvis. The single allowance: if he says only the name and pauses
+// ("Jarvis" ... "ponme Residente"), the next utterance within PENDING_NAME_MS is
+// read as the rest of that same sentence.
+const PENDING_NAME_MS = 4000;
 // Speech-to-text mangles the name: jarvis, yarvis, harvis, jarbis, jarvi...
 const NAME_RE = /\b(?:j|y|h|g|ch)?[aá]r[vb](?:[iíy]s?|[iíy]z|[iíy])\b/i;
 
@@ -74,9 +70,21 @@ export function mentionsJarvis(text: string): boolean {
   return NAME_RE.test(text);
 }
 
-/** True when Jarvis's reply ends by asking something, so one unprompted answer is expected. */
-export function asksQuestion(reply: string): boolean {
-  return /\?\s*["»”)]*\s*$/.test(reply.trim());
+// Words that may come right before the name without it counting as "not at the start".
+const START_FILLERS = new Set([
+  'oye', 'eh', 'ey', 'hey', 'vale', 'hola', 'buenas', 'buenos', 'dias', 'tardes', 'noches', 'a', 'ver',
+  'venga', 'ok', 'okay', 'bueno', 'mira', 'escucha', 'perdona', 'disculpa', 'bien',
+]);
+
+/**
+ * True when the sentence starts with the name: "Jarvis, ...", "oye Jarvis ...", "vale, hola Jarvis ...".
+ * "ponme Residente, Jarvis" or "le dije a Jarvis que..." do NOT count: the name is not at the start.
+ */
+export function startsWithJarvis(text: string): boolean {
+  const tokens = text.trim().split(/\s+/).slice(0, 3);
+  const idx = tokens.findIndex((t) => NAME_RE.test(t));
+  if (idx === -1) return false;
+  return tokens.slice(0, idx).every((t) => START_FILLERS.has(t.toLowerCase().normalize('NFD').replace(/[^a-z]/g, '')));
 }
 
 function normalizeWords(text: string): string[] {
@@ -121,17 +129,23 @@ function showNotice(message: string | null, ms = 4000): void {
 
 const clip = (s: string, n = 52) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
-export type SpeechVerdict = 'accept' | 'echo' | 'not-addressed';
+export type SpeechVerdict = 'accept' | 'continuation' | 'echo' | 'not-addressed';
 
-/** Decide whether a transcribed utterance is meant for Jarvis. Pure, so it is unit-tested. */
+/**
+ * Decide whether a transcribed utterance is meant for Jarvis. Pure, so it is unit-tested.
+ *  accept        starts with the name;
+ *  continuation  no name, but he said only the name a moment ago (pending);
+ *  echo          mostly Jarvis's own words coming back through the speakers;
+ *  not-addressed anything else (a reel, a friend, the TV).
+ */
 export function judgeSpeech(
   text: string,
-  ctx: { now: number; engagedUntil: number; lastReply: string; requireName: boolean },
+  ctx: { now: number; pendingNameUntil: number; lastReply: string; requireName: boolean },
 ): SpeechVerdict {
   if (looksLikeEcho(text, ctx.lastReply)) return 'echo';
-  const engaged = ctx.now < ctx.engagedUntil;
-  if (ctx.requireName && !engaged && !mentionsJarvis(text)) return 'not-addressed';
-  return 'accept';
+  if (!ctx.requireName || startsWithJarvis(text)) return 'accept';
+  if (ctx.now < ctx.pendingNameUntil) return 'continuation';
+  return 'not-addressed';
 }
 
 function requireName(): boolean {
@@ -238,8 +252,9 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
   // constants, so a noisier room or a hotter mic gain doesn't just silently
   // never trigger speech detection.
   const noiseFloorRef = useRef(0.01);
-  // Until this time (ms epoch) any speech counts as addressed to Jarvis.
-  const engagedUntilRef = useRef(0);
+  // After he says only the name, the next utterance before this time (ms epoch)
+  // is read as the rest of that same sentence.
+  const pendingNameUntilRef = useRef(0);
   // What Jarvis last said, to recognise his own voice coming back through the mic.
   const lastReplyRef = useRef('');
   const speechThreshold = useCallback(
@@ -528,11 +543,11 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       }
       const verdict = judgeSpeech(text, {
         now: Date.now(),
-        engagedUntil: engagedUntilRef.current,
+        pendingNameUntil: pendingNameUntilRef.current,
         lastReply: lastReplyRef.current,
         requireName: requireName(),
       });
-      if (verdict !== 'accept') {
+      if (verdict === 'echo' || verdict === 'not-addressed') {
         console.log(
           verdict === 'echo'
             ? "[jarvis-call] ignored echo of Jarvis's own voice:"
@@ -546,15 +561,16 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
         );
         continue;
       }
+      if (verdict === 'continuation') text = `Jarvis, ${text}`; // the rest of "Jarvis ... <request>"
+      pendingNameUntilRef.current = 0;
       if (isNameOnly(text)) {
-        // Only the name: do not answer, just open the mic for the next sentence.
+        // Only the name: do not answer, wait a few seconds for the request.
         console.log('[jarvis-call] name only, waiting for the request');
-        engagedUntilRef.current = Date.now() + NAME_ONLY_WINDOW_MS;
-        showNotice('Te escucho… dime', NAME_ONLY_WINDOW_MS);
+        pendingNameUntilRef.current = Date.now() + PENDING_NAME_MS;
+        showNotice('Te escucho… dime', PENDING_NAME_MS);
         continue;
       }
       showNotice(null);
-      engagedUntilRef.current = 0; // the window is used up by this turn
 
       let reply = '';
       try {
@@ -602,8 +618,6 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       }
       // Let the room echo of Jarvis's last words die before the mic re-opens.
       await new Promise((r) => setTimeout(r, POST_SPEECH_PAUSE_MS));
-      // Only if Jarvis asked something may he answer once without the name.
-      engagedUntilRef.current = asksQuestion(reply) ? Date.now() + FOLLOWUP_WINDOW_MS : 0;
       // Either way, loop back to 'listening' next iteration — on a natural
       // end that's the normal turn-taking; on a barge-in it's the point of
       // the feature (the words spoken during the cut itself aren't
@@ -701,7 +715,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       });
 
       activeRef.current = true;
-      engagedUntilRef.current = Date.now() + FIRST_TURN_WINDOW_MS; // he just pressed the button to talk
+      pendingNameUntilRef.current = 0;
       useCallStore.getState().setActive(true);
       void loop();
     } catch (err) {
