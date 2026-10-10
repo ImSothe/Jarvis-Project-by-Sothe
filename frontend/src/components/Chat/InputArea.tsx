@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, Square, Paperclip, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore, generateId } from '../../lib/store';
+import { ensureDefaultModel } from '../../lib/default-model';
 import { streamChat, streamResearch } from '../../lib/sse';
 import { fetchSavings, getBase } from '../../lib/api';
 import { listConnectors, getSyncStatus } from '../../lib/connectors-api';
@@ -188,7 +189,10 @@ export function InputArea() {
     // read the previous render's `input`.
     const content = (overrideText ?? input).trim();
     if (!content || streamState.isStreaming) return '';
-    if (!selectedModel) {
+    // A tab can lose its model (server restart, reload while starting). Recover it
+    // right here instead of dropping what the user just said.
+    const activeModel = selectedModel || (await ensureDefaultModel());
+    if (!activeModel) {
       toast.error('Pick a model first (⌘K)');
       return '';
     }
@@ -197,7 +201,7 @@ export function InputArea() {
 
     let convId = activeId;
     if (!convId) {
-      convId = createConversation(selectedModel);
+      convId = createConversation(activeModel);
     }
 
     const userMsg: ChatMessage = {
@@ -267,14 +271,14 @@ export function InputArea() {
       category: 'chat',
       message: deepResearch
         ? `Research: "${content.slice(0, 80)}${content.length > 80 ? '...' : ''}"`
-        : `Request: "${content.slice(0, 80)}${content.length > 80 ? '...' : ''}" → ${selectedModel}`,
+        : `Request: "${content.slice(0, 80)}${content.length > 80 ? '...' : ''}" → ${activeModel}`,
     });
 
     try {
       if (deepResearch) {
         for await (const ev of streamResearch(
           content,
-          selectedModel,
+          activeModel,
           controller.signal,
         )) {
           if (ev.type === 'search_call') {
@@ -397,7 +401,7 @@ export function InputArea() {
         }
       } else {
       for await (const sseEvent of streamChat(
-        { model: selectedModel, messages: apiMessages, stream: true, temperature, max_tokens: maxTokens },
+        { model: activeModel, messages: apiMessages, stream: true, temperature, max_tokens: maxTokens },
         controller.signal,
       )) {
         const eventName = sseEvent.event;
@@ -408,7 +412,7 @@ export function InputArea() {
           setStreamState({ phase: 'Generating...' });
           useAppStore.getState().addLogEntry({
             timestamp: Date.now(), level: 'info', category: 'chat',
-            message: `Generating with ${selectedModel}...`,
+            message: `Generating with ${activeModel}...`,
           });
         } else if (eventName === 'tool_call_start') {
           try {
@@ -496,16 +500,16 @@ export function InputArea() {
       }
       const totalMs = Date.now() - startTime;
       const appState = useAppStore.getState();
-      const selectedOwner = appState.models.find((m) => m.id === selectedModel)?.owned_by;
+      const selectedOwner = appState.models.find((m) => m.id === activeModel)?.owned_by;
       const engineLabel = resolveChatEngine({
         routedEngine,
         serverEngine: appState.serverInfo?.engine,
-        selectedModel,
+        selectedModel: activeModel,
         selectedOwner,
       });
       const telemetry: MessageTelemetry = {
         engine: engineLabel,
-        model_id: selectedModel,
+        model_id: activeModel,
         total_ms: totalMs,
         ttft_ms: ttftMs,
         tokens_per_sec: usage?.completion_tokens

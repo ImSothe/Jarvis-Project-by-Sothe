@@ -13,15 +13,8 @@ import { CallOverlay } from './components/Chat/CallOverlay';
 import { SetupScreen } from './components/SetupScreen';
 import { Toaster } from './components/ui/sonner';
 import { useAppStore } from './lib/store';
-import { fetchModels, fetchServerInfo, fetchSavings, submitSavings, isTauri, getCloudKeyStatus } from './lib/api';
-
-// Keep in sync with the Google entry in CommandPalette.tsx's CLOUD_PROVIDERS.
-const DEFAULT_CLOUD_MODEL_BY_KEY: Record<string, string> = {
-  GEMINI_API_KEY: 'gemini-3.5-flash-lite',
-  GOOGLE_API_KEY: 'gemini-3.5-flash-lite',
-  ANTHROPIC_API_KEY: 'claude-sonnet-4-6',
-  OPENAI_API_KEY: 'gpt-4o-mini',
-};
+import { fetchModels, fetchServerInfo, fetchSavings, submitSavings, isTauri } from './lib/api';
+import { ensureDefaultModel } from './lib/default-model';
 import { OptInModal } from './components/OptInModal';
 import { UpdateChecker } from './components/Desktop/UpdateChecker';
 import { track, hashId } from './lib/analytics';
@@ -88,29 +81,15 @@ export default function App() {
   // a user running the plain browser build — not the desktop app — would
   // have to open the command palette and pick a model manually before the
   // chat input or the call button would do anything.
+  // A permanent watcher: whenever the tab has no model (page reload while the server
+  // was still starting, a server restart, a store reset), keep trying every 3s until
+  // one is picked. The old single attempt could leave "Pick a model first" stuck.
   useEffect(() => {
-    // Retry while the server is still starting (a page reload during a restart
-    // used to fail this single request and leave "Pick a model first" forever).
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const attempt = (triesLeft: number) => {
-      getCloudKeyStatus()
-        .then((status) => {
-          if (cancelled || useAppStore.getState().selectedModel) return;
-          const connectedKey = Object.entries(status).find(([, set]) => set)?.[0];
-          const defaultModel = connectedKey && DEFAULT_CLOUD_MODEL_BY_KEY[connectedKey];
-          if (defaultModel) useAppStore.getState().setSelectedModel(defaultModel);
-        })
-        .catch(() => {
-          if (!cancelled && triesLeft > 0) timer = setTimeout(() => attempt(triesLeft - 1), 2000);
-        });
-    };
-    attempt(30);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (selectedModel) return;
+    void ensureDefaultModel();
+    const id = setInterval(() => void ensureDefaultModel(), 3000);
+    return () => clearInterval(id);
+  }, [selectedModel]);
 
   // Fetch server info
   useEffect(() => {
