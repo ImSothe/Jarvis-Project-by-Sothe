@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asksQuestion, isNoiseTranscript, isSilenceReply, judgeSpeech, looksLikeEcho, mentionsJarvis } from './useCallMode';
+import { asksQuestion, isNameOnly, isNoiseTranscript, isSilenceReply, judgeSpeech, looksLikeEcho, mentionsJarvis } from './useCallMode';
 
 describe('isNoiseTranscript', () => {
   it.each([
@@ -95,4 +95,14 @@ describe('judgeSpeech (the rule that stops reels and friends)', () => {
   it('lets everything through when the name requirement is switched off', () => {
     expect(judgeSpeech('tío es que me dijo que no venía', { ...base, requireName: false })).toBe('accept');
   });
+});
+describe('isNameOnly', () => {
+  it.each(['Jarvis', 'Jarvis.', 'oye Jarvis', 'Eh, Jarvis', 'hola Jarvis', 'vale yarvis', 'Jarvis, dime'])(
+    'is only a call: %j',
+    (text) => { expect(isNameOnly(text)).toBe(true); },
+  );
+  it.each(['Jarvis, ponme Residente', 'oye Jarvis qué hora es', 'Jarvis abre Spotify', 'hola qué tal', 'dime algo', ''])(
+    'is a real request or not a call: %j',
+    (text) => { expect(isNameOnly(text)).toBe(false); },
+  );
 });

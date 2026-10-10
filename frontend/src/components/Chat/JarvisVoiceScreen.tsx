@@ -45,6 +45,7 @@ export function JarvisVoiceScreen({ fullViewport = false, onHangUp, showExitToTe
   const level = useCallStore((s) => s.level);
   const isActive = useCallStore((s) => s.isActive);
   const error = useCallStore((s) => s.error);
+  const notice = useCallStore((s) => s.notice);
   const theme = useAppStore((s) => s.settings.hudTheme);
   const setTheme = (t: HudTheme) => useAppStore.getState().updateSettings({ hudTheme: t });
   const accent = error ? '#ff4444' : theme === 'blue' ? '#00d2ff' : '#ffaa00';
@@ -105,6 +106,14 @@ export function JarvisVoiceScreen({ fullViewport = false, onHangUp, showExitToTe
         {isActive && state === 'listening' && (
           <p className="text-[10px] font-mono tracking-widest" style={{ color: accent, opacity: 0.3 }}>
             OR PRESS SPACE TO SEND NOW
+          </p>
+        )}
+        {isActive && notice && (
+          <p
+            className="text-[11px] font-mono tracking-wider max-w-[70vw] text-center"
+            style={{ color: accent, opacity: 0.75 }}
+          >
+            {notice}
           </p>
         )}
         {showExitToText && !isActive && (

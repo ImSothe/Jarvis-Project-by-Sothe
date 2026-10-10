@@ -17,6 +17,9 @@ interface CallStore {
    * see useCallMode), shown in the HUD instead of silently doing nothing.
    * Cleared automatically at the start of the next successful turn. */
   error: string | null;
+  /** Short, self-clearing message about what the call just did with what it heard
+   * (e.g. ignored because it was not addressed to Jarvis). Not an error. */
+  notice: string | null;
   controls: CallControls;
   setControls: (controls: CallControls) => void;
   setState: (state: CallState) => void;
@@ -24,6 +27,7 @@ interface CallStore {
   setActive: (active: boolean) => void;
   setSupported: (supported: boolean) => void;
   setError: (error: string | null) => void;
+  setNotice: (notice: string | null) => void;
 }
 
 const noop = () => {};
@@ -39,6 +43,7 @@ export const useCallStore = create<CallStore>((set) => ({
   isActive: false,
   supported: true,
   error: null,
+  notice: null,
   controls: { start: noop, end: noop },
   setControls: (controls) => set({ controls }),
   setState: (state) => set({ state }),
@@ -46,4 +51,5 @@ export const useCallStore = create<CallStore>((set) => ({
   setActive: (isActive) => set({ isActive }),
   setSupported: (supported) => set({ supported }),
   setError: (error) => set({ error }),
+  setNotice: (notice) => set({ notice }),
 }));

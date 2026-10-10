@@ -14,7 +14,11 @@ import { transcribeAudio } from '../lib/api';
 // 7s with "nothing heard", which looks identical to the call being stuck).
 const SPEECH_RMS_THRESHOLD = 0.035;
 const SILENCE_RMS_THRESHOLD = 0.03;
-const SILENCE_HOLD_MS = 550;
+// People pause after saying the name or when they start thinking, so wait longer
+// when little has been said so far, and less once the sentence is under way.
+const SILENCE_HOLD_MS = 800;
+const SILENCE_HOLD_SHORT_MS = 1100;
+const SHORT_UTTERANCE_MS = 1800;
 const STARTUP_SILENCE_MS = 7000;
 const MAX_TURN_MS = 15000;
 const NOISE_FLOOR_CALIBRATION_MS = 400;
@@ -59,8 +63,10 @@ export function isNoiseTranscript(text: string): boolean {
 //  - exception 2: ONE answer, within a few seconds, right after Jarvis asked a question.
 // A window is consumed by the turn it accepts; it is never extended by accepted
 // speech (extending it let a reel or a friend keep Jarvis talking forever).
-const FIRST_TURN_WINDOW_MS = 10000;
-const FOLLOWUP_WINDOW_MS = 8000;
+const FIRST_TURN_WINDOW_MS = 6000;
+const FOLLOWUP_WINDOW_MS = 6000;
+// Saying just the name opens the mic for the next sentence (like a wake word).
+const NAME_ONLY_WINDOW_MS = 10000;
 // Speech-to-text mangles the name: jarvis, yarvis, harvis, jarbis, jarvi...
 const NAME_RE = /\b(?:j|y|h|g|ch)?[aá]r[vb](?:[iíy]s?|[iíy]z|[iíy])\b/i;
 
@@ -95,6 +101,25 @@ export function looksLikeEcho(heard: string, lastReply: string): boolean {
   const overlap = h.filter((w) => said.has(w)).length / h.length;
   return overlap >= 0.7;
 }
+
+const NAME_FILLERS = new Set(['oye', 'eh', 'ey', 'hey', 'vale', 'dime', 'escucha', 'jarvis', 'buenas', 'hola']);
+
+/** True when the user only called the assistant ("Jarvis", "oye Jarvis") without asking anything. */
+export function isNameOnly(text: string): boolean {
+  if (!mentionsJarvis(text)) return false;
+  const rest = normalizeWords(text).filter((w) => !NAME_RE.test(w) && !NAME_FILLERS.has(w));
+  return rest.length === 0;
+}
+
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+/** Show a short message on the call screen about what was just heard and why it was or was not answered. */
+function showNotice(message: string | null, ms = 4000): void {
+  useCallStore.getState().setNotice(message);
+  if (noticeTimer) clearTimeout(noticeTimer);
+  if (message) noticeTimer = setTimeout(() => useCallStore.getState().setNotice(null), ms);
+}
+
+const clip = (s: string, n = 52) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 export type SpeechVerdict = 'accept' | 'echo' | 'not-addressed';
 
@@ -435,7 +460,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
           if (runStart !== null) longestRunMs = Math.max(longestRunMs, now - runStart);
         } else if (hasSpoken && level < silenceCutoff) {
           if (silenceSince === null) silenceSince = now;
-          else if (now - silenceSince > SILENCE_HOLD_MS) {
+          else if (now - silenceSince > (voicedMs < SHORT_UTTERANCE_MS ? SILENCE_HOLD_SHORT_MS : SILENCE_HOLD_MS)) {
             console.log('[jarvis-call] silence detected -> sending to STT');
             recorder.stop();
             return;
@@ -514,8 +539,21 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
             : '[jarvis-call] ignored speech not addressed to Jarvis (reel, video, other people):',
           JSON.stringify(text),
         );
+        showNotice(
+          verdict === 'echo'
+            ? `Ignorado (eco de mi voz): «${clip(text)}»`
+            : `Ignorado, no dijiste «Jarvis»: «${clip(text)}»`,
+        );
         continue;
       }
+      if (isNameOnly(text)) {
+        // Only the name: do not answer, just open the mic for the next sentence.
+        console.log('[jarvis-call] name only, waiting for the request');
+        engagedUntilRef.current = Date.now() + NAME_ONLY_WINDOW_MS;
+        showNotice('Te escucho… dime', NAME_ONLY_WINDOW_MS);
+        continue;
+      }
+      showNotice(null);
       engagedUntilRef.current = 0; // the window is used up by this turn
 
       let reply = '';
@@ -533,6 +571,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       if (!reply) continue;
       if (isSilenceReply(reply)) {
         console.log('[jarvis-call] model chose silence, not speaking');
+        showNotice(`No lo tomé como para mí: «${clip(text)}»`);
         continue;
       }
 
