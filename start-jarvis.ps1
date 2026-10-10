@@ -23,6 +23,10 @@ if (-not $env:GEMINI_API_KEY) {
 $jarvisArgs = @('gui')
 if ($NoBrowser) { $jarvisArgs += '--no-browser' }
 
+# The package version comes from git, so every new commit makes `uv run` want to reinstall the
+# editable package, which fails if jarvis.exe is running. Do it here, before it starts.
+# --frozen leaves uv.lock alone, --inexact keeps our extra packages.
+uv sync --frozen --extra desktop --inexact 2>&1 | Out-Null
 # Optional runtime packages that are not in pyproject (changing pyproject makes `uv run`
 # try to replace jarvis.exe while it is running). Install them once if missing.
 $venvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
