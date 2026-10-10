@@ -31,6 +31,7 @@ _ALLOWED_HOSTS = (
     "youtube.com", "youtu.be", "instagram.com", "tiktok.com", "x.com", "twitter.com",
 )
 _MAX_SECONDS = 180
+_MAX_FRAMES = 8
 _TRANSCRIPT_CLIP = 3500
 
 
@@ -78,10 +79,11 @@ class AnalyzeVideoTool(BaseTool):
             name="analyze_video",
             description=(
                 "Study a public short video from a link (YouTube/Shorts, Instagram "
-                "Reel, TikTok, X). Returns its stats, caption, the opening hook and "
-                "the transcript, so you can explain why it works and adapt its "
-                "STRUCTURE into an original script. Audio and metadata only: you "
-                "cannot see the visuals. Max 3 minutes. Never copy its wording."
+                "Reel, TikTok, X). Returns its stats, caption, the opening hook, the "
+                "transcript and a description of sampled frames (on-screen text, "
+                "visual hook, style), so you can explain why it works and adapt its "
+                "STRUCTURE into an original script. Frames are sampled, so fast cuts "
+                "and exact timing are approximate. Max 3 minutes. Never copy its wording."
             ),
             parameters={
                 "type": "object",
@@ -117,7 +119,10 @@ class AnalyzeVideoTool(BaseTool):
                     return self._fail(
                         f"The video lasts {int(duration)}s; the limit is {_MAX_SECONDS}s."
                     )
-                dl_opts = {**base_opts, "format": "bestaudio/best",
+                # Low-res video + audio: enough to read frames, small to download.
+                dl_opts = {**base_opts,
+                           "format": "bv*[height<=480]+ba/b[height<=480]/b/bv*+ba",
+                           "merge_output_format": "mp4",
                            "outtmpl": str(Path(tmp) / "src.%(ext)s"),
                            "ffmpeg_location": str(Path(ffmpeg).parent)}
                 with yt_dlp.YoutubeDL(dl_opts) as ydl:
@@ -127,23 +132,63 @@ class AnalyzeVideoTool(BaseTool):
 
             src = next((str(p) for p in Path(tmp).glob("src.*")), None)
             if not src:
-                return self._fail("Download produced no audio.")
+                return self._fail("Download produced no media.")
             wav = str(Path(tmp) / "audio.wav")
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                [ffmpeg, "-v", "error", "-y", "-i", src, "-t", str(_MAX_SECONDS),
+                [ffmpeg, "-v", "error", "-y", "-i", src, "-vn", "-t", str(_MAX_SECONDS),
                  "-ac", "1", "-ar", "16000", wav],
                 capture_output=True, timeout=120,
             )
-            if proc.returncode != 0 or not os.path.exists(wav):
-                return self._fail("Could not extract the audio track.")
-            transcript = self._transcribe(Path(wav).read_bytes())
+            transcript = ""
+            if proc.returncode == 0 and os.path.exists(wav):
+                transcript = self._transcribe(Path(wav).read_bytes())
+            frames, step = self._extract_frames(ffmpeg, src, tmp, duration)
+            visuals = self._describe_frames(frames, step) if frames else ""
 
         return ToolResult(
             tool_name=self.tool_id,
-            content=self._report(info, transcript),
+            content=self._report(info, transcript, visuals),
             success=True,
             metadata={"url": url, "title": info.get("title", "")},
         )
+
+    @staticmethod
+    def _extract_frames(ffmpeg: str, src: str, tmp: str, duration: float):
+        """Up to _MAX_FRAMES evenly spaced JPEG frames; returns (bytes list, seconds apart)."""
+        step = max(1.0, round((duration or 8) / _MAX_FRAMES, 1)) if duration else 1.0
+        pattern = str(Path(tmp) / "frame_%02d.jpg")
+        subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [ffmpeg, "-v", "error", "-y", "-i", src, "-t", str(_MAX_SECONDS),
+             "-vf", f"fps=1/{step},scale=512:-2", "-frames:v", str(_MAX_FRAMES), pattern],
+            capture_output=True, timeout=120,
+        )
+        files = sorted(Path(tmp).glob("frame_*.jpg"))
+        return [f.read_bytes() for f in files], step
+
+    @staticmethod
+    def _describe_frames(frames: List[bytes], step: float) -> str:
+        """Ask Gemini vision to read on-screen text and describe the visual structure."""
+        key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+        if not key:
+            return "(visual analysis unavailable: no Gemini key)"
+        try:
+            from google import genai
+            from google.genai import types
+
+            model = os.environ.get("GEMINI_VISION_MODEL", "gemini-3.5-flash-lite")
+            prompt = (
+                f"These are {len(frames)} frames of a short video, in order, about {step}s apart. "
+                "In English, factual and compact: (1) transcribe EXACTLY any on-screen text per frame; "
+                "(2) describe what is shown and the shot type; (3) note the visual hook in the first "
+                "frame; (4) text style, subtitles, effects and pacing you can infer. "
+                "Do not guess what is not visible."
+            )
+            parts = [prompt] + [types.Part.from_bytes(data=f, mime_type="image/jpeg") for f in frames]
+            client = genai.Client(api_key=key)  # keep a reference: a temporary is closed on GC
+            resp = client.models.generate_content(model=model, contents=parts)
+            return (resp.text or "").strip()[:2500] or "(no visual description returned)"
+        except Exception as exc:
+            return f"(visual analysis failed: {str(exc)[:120]})"
 
     def _transcribe(self, audio: bytes) -> str:
         try:
@@ -160,9 +205,11 @@ class AnalyzeVideoTool(BaseTool):
         return ToolResult(tool_name=self.tool_id, content=msg, success=False)
 
     @staticmethod
-    def _report(info: Dict[str, Any], transcript: str) -> str:
+    def _report(info: Dict[str, Any], transcript: str, visuals: str = "") -> str:
         views, likes, comments = info.get("view_count"), info.get("like_count"), info.get("comment_count")
         dur = info.get("duration")
+        if transcript.strip().lower() in ("<noise>", "<music>", "[music]", "[noise]"):
+            transcript = ""
         words = len(transcript.split())
         wpm = f"{words / (dur / 60):.0f}" if dur and words else "?"
         first_words = " ".join(transcript.split()[:28])
@@ -173,9 +220,10 @@ class AnalyzeVideoTool(BaseTool):
             f"STATS: views {_fmt(views)} | likes {_fmt(likes)} ({_ratio(likes, views)} of views) | "
             f"comments {_fmt(comments)} ({_ratio(comments, views)}) | duration {dur or '?'}s | ~{wpm} words/min",
             f"CAPTION: {desc or '(none)'}",
-            f"HOOK (first words spoken): {first_words or '(no speech detected)'}",
+            f"HOOK (first words spoken): {first_words or '(no speech detected: likely music or text-on-screen only)'}",
             f"TRANSCRIPT ({words} words): {transcript[:_TRANSCRIPT_CLIP] or '(none: music only or transcription unavailable)'}",
-            "NOTE: audio and metadata only; on-screen visuals, text overlays and cuts were not analysed.",
+            f"VISUALS (from sampled frames): {visuals or '(not available)'}",
+            "NOTE: visuals come from a few sampled frames, so fast cuts, motion and exact timing are only approximated.",
         ]
         return "\n".join(lines)
 
