@@ -192,4 +192,9 @@ try:
 except ImportError:
     pass
 
+try:
+    import openjarvis.tools.optimizer_info  # noqa: F401
+except ImportError:
+    pass
+
 __all__ = ["BaseTool", "ToolExecutor", "ToolSpec"]
