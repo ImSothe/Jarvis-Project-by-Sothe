@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import time
 from typing import List
 
 from openjarvis.core.registry import TTSRegistry
@@ -26,6 +28,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "es-ES-AlvaroNeural"
 _VOICE_RE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z]+Neural$")
 _TIMEOUT_S = 25.0
+_RETRY_AFTER_S = 300.0   # after a failure skip Edge for a while instead of paying its timeout every sentence
+_down_until = 0.0
+_PITCH_RE = re.compile(r"^[+-]\d{1,2}Hz$")
+
+
+def _pitch() -> str:
+    """Optional deeper/higher tone from OPENJARVIS_EDGE_PITCH (e.g. -12Hz); default untouched."""
+    value = os.environ.get("OPENJARVIS_EDGE_PITCH", "").strip()
+    return value if _PITCH_RE.match(value) else "+0Hz"
 
 
 def _clean(text: str) -> str:
@@ -65,11 +76,17 @@ class EdgeTTSBackend(TTSBackend):
         voice_id: str = "",
         speed: float = 1.0,
         output_format: str = "mp3",
+        _no_gemini_fallback: bool = False,
     ) -> TTSResult:
         voice = voice_id if _VOICE_RE.match(voice_id or "") else DEFAULT_VOICE
         spoken = _clean(text)
         if not spoken:
             raise ValueError("Nothing to say after cleaning the text")
+        global _down_until
+        if time.time() < _down_until:
+            if _no_gemini_fallback:
+                raise RuntimeError("Edge TTS is temporarily down")
+            return self._gemini_fallback(spoken)
         try:
             audio = self._edge(spoken, voice, speed)
             return TTSResult(
@@ -77,7 +94,10 @@ class EdgeTTSBackend(TTSBackend):
                 metadata={"backend": "edge_tts"},
             )
         except Exception as exc:
-            logger.warning("Edge TTS failed (%s); falling back to Gemini TTS", exc)
+            _down_until = time.time() + _RETRY_AFTER_S
+            logger.warning("Edge TTS failed (%s); using Gemini TTS for the next %d s", exc, int(_RETRY_AFTER_S))
+            if _no_gemini_fallback:
+                raise
             return self._gemini_fallback(spoken)
 
     @staticmethod
@@ -85,10 +105,11 @@ class EdgeTTSBackend(TTSBackend):
         import edge_tts
 
         rate = f"{int(round((max(0.5, min(2.0, speed)) - 1.0) * 100)):+d}%"
+        pitch = _pitch()
 
         async def run() -> bytes:
             chunks: List[bytes] = []
-            async for part in edge_tts.Communicate(text, voice, rate=rate).stream():
+            async for part in edge_tts.Communicate(text, voice, rate=rate, pitch=pitch).stream():
                 if part["type"] == "audio":
                     chunks.append(part["data"])
             return b"".join(chunks)
@@ -106,4 +127,4 @@ class EdgeTTSBackend(TTSBackend):
         backend = GeminiTTSBackend()
         if not backend.health():
             raise RuntimeError("Edge TTS failed and Gemini TTS is not available")
-        return backend.synthesize(text, voice_id="Charon")  # a male Gemini voice
+        return backend.synthesize(text, voice_id=os.environ.get("OPENJARVIS_FALLBACK_VOICE", "Charon"))  # a male Gemini voice

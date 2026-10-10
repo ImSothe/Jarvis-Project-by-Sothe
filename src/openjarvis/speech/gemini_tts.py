@@ -19,6 +19,8 @@ except ImportError:
     genai = None  # type: ignore[assignment]
     genai_types = None  # type: ignore[assignment]
 
+_STYLE_MODEL = "gemini-3.1-flash-tts-preview"
+
 # The 30 prebuilt voices documented for Gemini's native TTS models.
 _VOICES = [
     "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
@@ -92,6 +94,10 @@ class GeminiTTSBackend(TTSBackend):
             raise RuntimeError("Gemini client not initialized (missing API key?)")
 
         voice = voice_id or "Kore"
+        # Optional acting direction (GEMINI_TTS_STYLE), e.g. "Di con voz grave y seca". Only the
+        # 3.1 preview TTS model follows it silently; the other models READ IT ALOUD, so they get
+        # the plain text.
+        style = os.environ.get("GEMINI_TTS_STYLE", "").strip()
         config = genai_types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=genai_types.SpeechConfig(
@@ -102,12 +108,15 @@ class GeminiTTSBackend(TTSBackend):
                 )
             ),
         )
-        models = [self._model] + [m for m in self._FALLBACK_MODELS if m != self._model]
+        first = _STYLE_MODEL if style else self._model
+        models = [first] + [m for m in (self._model, *self._FALLBACK_MODELS) if m != first]
+        models = list(dict.fromkeys(models))
         last_err: Exception | None = None
         for model in models:
             try:
+                spoken = f"{style.rstrip(':')}: {text}" if style and model == _STYLE_MODEL else text
                 response = self._client.models.generate_content(
-                    model=model, contents=text, config=config
+                    model=model, contents=spoken, config=config
                 )
                 inline = response.candidates[0].content.parts[0].inline_data
                 audio_bytes = _ensure_wav(inline.data, getattr(inline, "mime_type", "") or "")
@@ -121,6 +130,15 @@ class GeminiTTSBackend(TTSBackend):
                 sample_rate=_wav_sample_rate(audio_bytes),
                 metadata={"backend": "gemini_tts", "model": model},
             )
+        # Every Gemini model failed (quota...): try the Edge voice instead of going silent.
+        try:
+            from openjarvis.speech.edge_tts_voice import EdgeTTSBackend
+
+            edge = EdgeTTSBackend()
+            if edge.health():
+                return edge.synthesize(text, speed=speed, _no_gemini_fallback=True)
+        except Exception:
+            pass
         raise last_err if last_err else RuntimeError("Gemini TTS failed")
 
     def available_voices(self) -> List[str]:
