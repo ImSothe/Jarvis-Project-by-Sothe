@@ -89,14 +89,27 @@ export default function App() {
   // have to open the command palette and pick a model manually before the
   // chat input or the call button would do anything.
   useEffect(() => {
-    getCloudKeyStatus()
-      .then((status) => {
-        if (useAppStore.getState().selectedModel) return;
-        const connectedKey = Object.entries(status).find(([, set]) => set)?.[0];
-        const defaultModel = connectedKey && DEFAULT_CLOUD_MODEL_BY_KEY[connectedKey];
-        if (defaultModel) useAppStore.getState().setSelectedModel(defaultModel);
-      })
-      .catch(() => {});
+    // Retry while the server is still starting (a page reload during a restart
+    // used to fail this single request and leave "Pick a model first" forever).
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (triesLeft: number) => {
+      getCloudKeyStatus()
+        .then((status) => {
+          if (cancelled || useAppStore.getState().selectedModel) return;
+          const connectedKey = Object.entries(status).find(([, set]) => set)?.[0];
+          const defaultModel = connectedKey && DEFAULT_CLOUD_MODEL_BY_KEY[connectedKey];
+          if (defaultModel) useAppStore.getState().setSelectedModel(defaultModel);
+        })
+        .catch(() => {
+          if (!cancelled && triesLeft > 0) timer = setTimeout(() => attempt(triesLeft - 1), 2000);
+        });
+    };
+    attempt(30);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch server info
