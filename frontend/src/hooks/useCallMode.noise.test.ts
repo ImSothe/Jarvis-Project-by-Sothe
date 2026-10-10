@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isNoiseTranscript, isSilenceReply, mentionsJarvis } from './useCallMode';
+import { asksQuestion, isNoiseTranscript, isSilenceReply, judgeSpeech, looksLikeEcho, mentionsJarvis } from './useCallMode';
 
 describe('isNoiseTranscript', () => {
   it.each([
@@ -38,5 +38,61 @@ describe('mentionsJarvis', () => {
     'en esta parte del tutorial vamos a ver', 'no te olvides de suscribirte', 'garbanzos',
   ])('does not hear the name in %j', (text) => {
     expect(mentionsJarvis(text)).toBe(false);
+  });
+});
+describe('asksQuestion', () => {
+  it.each(['¿Qué quieres escuchar?', 'Dime, ¿qué tal el día? ', '¿Seguro?"', 'Vale, ¿lo grabamos hoy?'])('is a question: %j', (r) => {
+    expect(asksQuestion(r)).toBe(true);
+  });
+  it.each(['Hecho, crack.', 'Reproduciendo a Residente.', '¿Qué tal? Ya está.', ''])('is not a question: %j', (r) => {
+    expect(asksQuestion(r)).toBe(false);
+  });
+});
+
+describe('looksLikeEcho', () => {
+  const last = 'Buenas, crack. Soy Jarvis. Hoy toca grabar el vídeo de Sothe Optimizer.';
+  it('detects his own voice coming back', () => {
+    expect(looksLikeEcho('soy Jarvis hoy toca grabar el vídeo', last)).toBe(true);
+    expect(looksLikeEcho('Soy Jarvis', last)).toBe(true);
+  });
+  it('does not flag something new', () => {
+    expect(looksLikeEcho('Jarvis, ponme Residente', last)).toBe(false);
+    expect(looksLikeEcho('abre Valorant', last)).toBe(false);
+  });
+  it('never flags when there was no previous reply', () => {
+    expect(looksLikeEcho('Jarvis', '')).toBe(false);
+  });
+});
+
+describe('judgeSpeech (the rule that stops reels and friends)', () => {
+  const base = { now: 100000, engagedUntil: 0, lastReply: '', requireName: true };
+
+  it('ignores a whole reel or a chat with a friend, utterance after utterance', () => {
+    const reel = [
+      'en esta parte del tutorial vamos a ver cómo se hace',
+      'no te olvides de darle like y suscribirte al canal',
+      'tío es que me dijo que no iba a venir hoy',
+      'jajaja qué fuerte, y entonces qué hiciste',
+    ];
+    for (const line of reel) expect(judgeSpeech(line, base)).toBe('not-addressed');
+  });
+
+  it('accepts anything that says the name', () => {
+    expect(judgeSpeech('Jarvis, ponme Residente', base)).toBe('accept');
+    expect(judgeSpeech('oye yarvis qué hora es', base)).toBe('accept');
+  });
+
+  it('accepts speech inside an open window, rejects it after it closes', () => {
+    expect(judgeSpeech('sí, ponla', { ...base, engagedUntil: base.now + 5000 })).toBe('accept');
+    expect(judgeSpeech('sí, ponla', { ...base, engagedUntil: base.now - 1 })).toBe('not-addressed');
+  });
+
+  it('treats his own words coming back as an echo, even if they contain the name', () => {
+    const lastReply = 'Buenas, crack. Soy Jarvis. Hoy toca grabar el vídeo.';
+    expect(judgeSpeech('Soy Jarvis, hoy toca grabar', { ...base, lastReply })).toBe('echo');
+  });
+
+  it('lets everything through when the name requirement is switched off', () => {
+    expect(judgeSpeech('tío es que me dijo que no venía', { ...base, requireName: false })).toBe('accept');
   });
 });

@@ -53,16 +53,60 @@ export function isNoiseTranscript(text: string): boolean {
 }
 
 // Only react when addressed. Audio from reels, videos or other people would
-// otherwise be transcribed and answered. Speech is accepted when it says the
-// assistant's name, or inside a short follow-up window after Jarvis last spoke
-// (so a normal back-and-forth does not need the name every time).
-const FIRST_TURN_WINDOW_MS = 20000;
-const FOLLOWUP_WINDOW_MS = 12000;
+// otherwise be transcribed and answered. Strict rules:
+//  - every utterance must say the assistant's name ("Jarvis");
+//  - exception 1: a short window right after pressing the call button;
+//  - exception 2: ONE answer, within a few seconds, right after Jarvis asked a question.
+// A window is consumed by the turn it accepts; it is never extended by accepted
+// speech (extending it let a reel or a friend keep Jarvis talking forever).
+const FIRST_TURN_WINDOW_MS = 10000;
+const FOLLOWUP_WINDOW_MS = 8000;
 // Speech-to-text mangles the name: jarvis, yarvis, harvis, jarbis, jarvi...
 const NAME_RE = /\b(?:j|y|h|g|ch)?[aá]r[vb](?:[iíy]s?|[iíy]z|[iíy])\b/i;
 
 export function mentionsJarvis(text: string): boolean {
   return NAME_RE.test(text);
+}
+
+/** True when Jarvis's reply ends by asking something, so one unprompted answer is expected. */
+export function asksQuestion(reply: string): boolean {
+  return /\?\s*["»”)]*\s*$/.test(reply.trim());
+}
+
+function normalizeWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+}
+
+/**
+ * True when what the mic heard is mostly what Jarvis itself just said (speaker echo),
+ * for example his own "soy Jarvis" coming back through the speakers.
+ */
+export function looksLikeEcho(heard: string, lastReply: string): boolean {
+  if (!lastReply) return false;
+  const h = normalizeWords(heard);
+  if (h.length < 2) return false;
+  const said = new Set(normalizeWords(lastReply));
+  const overlap = h.filter((w) => said.has(w)).length / h.length;
+  return overlap >= 0.7;
+}
+
+export type SpeechVerdict = 'accept' | 'echo' | 'not-addressed';
+
+/** Decide whether a transcribed utterance is meant for Jarvis. Pure, so it is unit-tested. */
+export function judgeSpeech(
+  text: string,
+  ctx: { now: number; engagedUntil: number; lastReply: string; requireName: boolean },
+): SpeechVerdict {
+  if (looksLikeEcho(text, ctx.lastReply)) return 'echo';
+  const engaged = ctx.now < ctx.engagedUntil;
+  if (ctx.requireName && !engaged && !mentionsJarvis(text)) return 'not-addressed';
+  return 'accept';
 }
 
 function requireName(): boolean {
@@ -171,6 +215,8 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
   const noiseFloorRef = useRef(0.01);
   // Until this time (ms epoch) any speech counts as addressed to Jarvis.
   const engagedUntilRef = useRef(0);
+  // What Jarvis last said, to recognise his own voice coming back through the mic.
+  const lastReplyRef = useRef('');
   const speechThreshold = useCallback(
     () => Math.max(SPEECH_RMS_THRESHOLD, noiseFloorRef.current * 2.5),
     [],
@@ -455,12 +501,22 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
         console.log('[jarvis-call] ignored noise transcript:', JSON.stringify(text));
         continue;
       }
-      const engaged = Date.now() < engagedUntilRef.current;
-      if (requireName() && !engaged && !mentionsJarvis(text)) {
-        console.log('[jarvis-call] ignored speech not addressed to Jarvis (reel, video, other people):', JSON.stringify(text));
+      const verdict = judgeSpeech(text, {
+        now: Date.now(),
+        engagedUntil: engagedUntilRef.current,
+        lastReply: lastReplyRef.current,
+        requireName: requireName(),
+      });
+      if (verdict !== 'accept') {
+        console.log(
+          verdict === 'echo'
+            ? "[jarvis-call] ignored echo of Jarvis's own voice:"
+            : '[jarvis-call] ignored speech not addressed to Jarvis (reel, video, other people):',
+          JSON.stringify(text),
+        );
         continue;
       }
-      engagedUntilRef.current = Date.now() + FOLLOWUP_WINDOW_MS;
+      engagedUntilRef.current = 0; // the window is used up by this turn
 
       let reply = '';
       try {
@@ -480,6 +536,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
         continue;
       }
 
+      lastReplyRef.current = reply;
       useCallStore.getState().setState('speaking');
       console.log('[jarvis-call] speaking...');
       // speak() never throws — on failure it swallows the error into its own
@@ -506,7 +563,8 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       }
       // Let the room echo of Jarvis's last words die before the mic re-opens.
       await new Promise((r) => setTimeout(r, POST_SPEECH_PAUSE_MS));
-      engagedUntilRef.current = Date.now() + FOLLOWUP_WINDOW_MS; // he may answer without the name
+      // Only if Jarvis asked something may he answer once without the name.
+      engagedUntilRef.current = asksQuestion(reply) ? Date.now() + FOLLOWUP_WINDOW_MS : 0;
       // Either way, loop back to 'listening' next iteration — on a natural
       // end that's the normal turn-taking; on a barge-in it's the point of
       // the feature (the words spoken during the cut itself aren't
