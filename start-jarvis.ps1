@@ -20,18 +20,28 @@ if (-not $env:GEMINI_API_KEY) {
     Write-Host 'GEMINI_API_KEY is empty in .env' -ForegroundColor Yellow
 }
 
-$jarvisArgs = @('gui')
-if ($NoBrowser) { $jarvisArgs += '--no-browser' }
+# --- Bootstrap (native tools print progress to stderr; that must not be fatal here) ---
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 
 # The package version comes from git, so every new commit makes `uv run` want to reinstall the
 # editable package, which fails if jarvis.exe is running. Do it here, before it starts.
 # --frozen leaves uv.lock alone, --inexact keeps our extra packages.
 uv sync --frozen --extra desktop --inexact 2>&1 | Out-Null
-# Optional runtime packages that are not in pyproject (changing pyproject makes `uv run`
+
+# Optional runtime packages that are not in pyproject (changing pyproject would make `uv run`
 # try to replace jarvis.exe while it is running). Install them once if missing.
 $venvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 foreach ($pkg in @(@{ mod = 'google.genai'; pip = 'google-genai' }, @{ mod = 'edge_tts'; pip = 'edge-tts' })) {
     & $venvPy -c "import $($pkg.mod)" 2>$null
-    if ($LASTEXITCODE -ne 0) { Write-Host "Installing $($pkg.pip)..."; uv pip install $pkg.pip | Out-Null }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Installing $($pkg.pip)..."
+        uv pip install $pkg.pip 2>&1 | Out-Null
+    }
 }
+$ErrorActionPreference = $prevEap
+# --- End bootstrap ---
+
+$jarvisArgs = @('gui')
+if ($NoBrowser) { $jarvisArgs += '--no-browser' }
 & (Join-Path $PSScriptRoot '.venv\Scripts\jarvis.exe') @jarvisArgs
