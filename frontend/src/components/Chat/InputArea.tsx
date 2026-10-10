@@ -214,7 +214,7 @@ export function InputArea() {
 
     // Build API messages before adding assistant placeholder
     const currentMessages = useAppStore.getState().messages;
-    const apiMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] =
+    const apiMessages: { role: 'system' | 'user' | 'assistant'; content: string; name?: string }[] =
       currentMessages.map((m) => ({
         role: m.role,
         content: m.content,
@@ -222,8 +222,16 @@ export function InputArea() {
     // Call mode prepends a persona instruction for just this request — it's
     // never added to the visible transcript, so a normal typed/spoken
     // message right after a call still gets the default assistant voice.
+    // name: 'call_format' tells the backend this is an ADDITION on top of the
+    // normal system prompt (format only), not a replacement for it. Without
+    // this tag, any caller-supplied system message makes the server skip
+    // building the real identity/SOUL/tools prompt entirely (see
+    // `_ensure_identity_prompt` in routes.py) — which was silently dropping
+    // every SOUL.md rule, including "always use spotify_play for music
+    // requests", during calls, while text chat (which sends no system
+    // message) kept working fine.
     if (opts?.systemPrompt) {
-      apiMessages.unshift({ role: 'system', content: opts.systemPrompt });
+      apiMessages.unshift({ role: 'system', content: opts.systemPrompt, name: 'call_format' });
     }
 
     const assistantMsg: ChatMessage = {

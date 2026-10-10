@@ -73,7 +73,12 @@ def _ensure_identity_prompt(messages: list[Message], app_config) -> list[Message
     has supplied their own grounding and we do not add the server identity.
     All system messages are still folded into one leading entry because some
     chat templates reject multiple or mid-history system roles. Internally
-    tagged memory context does not count as caller grounding.
+    tagged memory context does not count as caller grounding, and neither
+    does a message named ``call_format``: the desktop UI's voice-call mode
+    sends one of those with a short formatting instruction ("short sentences,
+    no markdown") meant to sit ON TOP of the real system prompt, not replace
+    it (see ``JARVIS_CALL_PERSONA`` in ``useCallMode.ts``). Treating it like
+    full caller grounding silently dropped every SOUL.md rule during calls.
 
     Resolution of the identity text: the config comes from ``app.state`` when
     wired, otherwise ``load_config()``; the prompt itself is assembled by
@@ -86,7 +91,11 @@ def _ensure_identity_prompt(messages: list[Message], app_config) -> list[Message
     """
 
     def _is_caller_system_prompt(m: Message) -> bool:
-        return m.role == Role.SYSTEM and not m.metadata.get("memory_context")
+        return (
+            m.role == Role.SYSTEM
+            and not m.metadata.get("memory_context")
+            and m.name != "call_format"
+        )
 
     system_messages = [message for message in messages if message.role == Role.SYSTEM]
     caller_supplied_system = any(
