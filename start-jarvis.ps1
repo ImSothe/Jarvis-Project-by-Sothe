@@ -22,4 +22,12 @@ if (-not $env:GEMINI_API_KEY) {
 
 $jarvisArgs = @('gui')
 if ($NoBrowser) { $jarvisArgs += '--no-browser' }
+
+# Optional runtime packages that are not in pyproject (changing pyproject makes `uv run`
+# try to replace jarvis.exe while it is running). Install them once if missing.
+$venvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+foreach ($pkg in @(@{ mod = 'google.genai'; pip = 'google-genai' }, @{ mod = 'edge_tts'; pip = 'edge-tts' })) {
+    & $venvPy -c "import $($pkg.mod)" 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Host "Installing $($pkg.pip)..."; uv pip install $pkg.pip | Out-Null }
+}
 & (Join-Path $PSScriptRoot '.venv\Scripts\jarvis.exe') @jarvisArgs
