@@ -300,7 +300,17 @@ class FindViralVideosTool(BaseTool):
             f"{_fmt(views)} views in {age:.0f}d (~{_fmt(vpd)}/day) | likes {_fmt(likes and int(likes))}"
             for vpd, vid, title, chan, views, likes, age in rows[:limit]
         ]
-        return self._ok("\n".join(out) or "No usable results.")
+        videos = [
+            {"url": f"https://www.youtube.com/shorts/{vid}", "title": title, "channel": chan,
+             "views": views, "views_per_day": round(vpd), "age_days": round(age)}
+            for vpd, vid, title, chan, views, likes, age in rows[:limit]
+        ]
+        return ToolResult(
+            tool_name=self.tool_id,
+            content="\n".join(out) or "No usable results.",
+            success=True,
+            metadata={"videos": videos},
+        )
 
     @staticmethod
     def _get(endpoint: str, key: str, params: Dict[str, Any]) -> Dict[str, Any]:
