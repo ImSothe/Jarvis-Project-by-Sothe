@@ -227,4 +227,9 @@ try:
 except ImportError:
     pass
 
+try:
+    import openjarvis.tools.site_trust  # noqa: F401
+except ImportError:
+    pass
+
 __all__ = ["BaseTool", "ToolExecutor", "ToolSpec"]
