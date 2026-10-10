@@ -260,8 +260,13 @@ def start(
     DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     spawn_kwargs: dict = {}
     if sys.platform == "win32":
+        # Sothe: DETACHED_PROCESS left the venv launcher without a console, so the
+        # real interpreter it spawns got a NEW visible console (a Windows Terminal
+        # window), and closing that window killed the server. CREATE_NO_WINDOW gives
+        # the process a hidden console that its children inherit: no window to
+        # close, and still no console shared with the launching terminal.
         spawn_kwargs["creationflags"] = (
-            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         )
     else:
         spawn_kwargs["start_new_session"] = True

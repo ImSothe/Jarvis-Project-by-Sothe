@@ -120,13 +120,15 @@ const BARGE_IN_FRAMES = 10;
 const BARGE_IN_GRACE_MS = 700;
 const POST_SPEECH_PAUSE_MS = 250;
 
+// Only the voice-call format lives here. Personality and tone come from the
+// user's SOUL.md (Sothe: informal "tu", a friend, never "senor" or "usted").
+// The previous text asked for a formal Tony Stark butler and overrode SOUL.md.
 export const JARVIS_CALL_PERSONA =
-  'Eres Jarvis, el asistente de IA personal al estilo del mayordomo de Tony ' +
-  'Stark. Estás en una llamada de voz en tiempo real: responde siempre en ' +
-  '1-3 frases breves, con tono formal, ingenioso y resolutivo — directo a ' +
-  'la acción, sin rodeos ni disculpas innecesarias. Tu respuesta se va a ' +
-  'leer en voz alta, así que evita listas, markdown o texto que no suene ' +
-  'natural al hablarlo.';
+  'Estás en una llamada de voz en tiempo real: responde en 1-3 frases breves y ' +
+  'directas, sin listas, markdown ni símbolos, de forma que suene natural al ' +
+  'leerlo en voz alta. Mantén tu personalidad y tus reglas habituales: eres ' +
+  'un colega que tutea, nunca un mayordomo; no uses «señor», «usted» ni ' +
+  'ningún trato formal.';
 
 function rms(data: Uint8Array): number {
   let sum = 0;
