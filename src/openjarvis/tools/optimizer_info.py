@@ -174,11 +174,24 @@ class OptimizerInfoTool(BaseTool):
                     return self._err("Unknown profile. Use action=profile without id to list them.")
                 by_id = {t["id"]: t for t in _tweaks()}
                 rows = [_line(by_id[i]) if i in by_id else f"{i} | (id no encontrado en tweaks.json)" for i in prof.get("tweaks", [])]
-                return self._ok(f"{prof['name']}: {prof.get('desc')}\n" + "\n".join(rows) if rows else f"{prof['name']}: {prof.get('desc')}\n(sin ajustes: revierte todo)")
+                total = len(prof.get("tweaks", []))
+                head = f"{prof['name']} - TOTAL EXACTO: {total} ajustes. {prof.get('desc')}"
+                return self._ok(head + ("\n" + "\n".join(rows) if rows else "\n(sin ajustes: revierte todo)"))
             if action == "features":
-                return self._ok("\n".join(f"{f['name']} ({f['feature']}): {f.get('desc')}" for f in _load("features.json").get("features", [])))
+                feats = _load("features.json").get("features", [])
+                return self._ok(
+                    f"TOTAL EXACTO: {len(feats)} caracteristicas de Windows\n"
+                    + "\n".join(f"{f['name']} ({f['feature']}): {f.get('desc')}" for f in feats)
+                )
             if action == "apps":
-                return self._ok("\n".join(f"{a.get('category')} | {a.get('name')}" for a in self._apps()))
+                apps = self._apps()
+                counts: Dict[str, int] = {}
+                for a in apps:
+                    counts[a.get("category", "?")] = counts.get(a.get("category", "?"), 0) + 1
+                return self._ok(
+                    f"TOTAL EXACTO: {len(apps)} apps | por categoria: {counts}\n"
+                    + "\n".join(f"{a.get('category')} | {a.get('name')}" for a in apps)
+                )
         except FileNotFoundError as exc:
             return self._err(f"Optimizer data not found ({exc.filename}). Set SOTHE_OPTIMIZER_DIR.")
         except (ValueError, KeyError) as exc:
@@ -211,4 +224,5 @@ class OptimizerInfoTool(BaseTool):
                 rows = [t for t in rows if q in _blob(t)]
         shown = rows[:_MAX_RESULTS]
         more = f"\n(+{len(rows) - len(shown)} mas; afina el filtro)" if len(rows) > len(shown) else ""
-        return self._ok(head + ("\n".join(_line(t) for t in shown) or "Sin resultados.") + more)
+        total = f"TOTAL EXACTO: {len(rows)} ajustes\n"
+        return self._ok(total + head + ("\n".join(_line(t) for t in shown) or "Sin resultados.") + more)
