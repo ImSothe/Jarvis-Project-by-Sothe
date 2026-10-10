@@ -8,11 +8,12 @@ the desktop app is closed it is started and we wait for the device to appear.
 Tools:
   spotify_play     liked songs (shuffled by default), an artist, track, album or
                    playlist found by search, or resume.
-  spotify_control  pause, resume, next, previous, volume, shuffle, now_playing.
+  spotify_control  pause, resume, next, previous, volume, shuffle, now_playing, like.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import random
@@ -174,6 +175,32 @@ def _clean_query(text: Any) -> str:
     return re.sub(r"\s+", " ", q).strip()[:80]
 
 
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text.lower())).strip()
+
+
+def _similarity(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
+
+
+def _track_label(item: Dict[str, Any]) -> str:
+    name = item.get("name", "")
+    artists = " ".join(a.get("name", "") for a in item.get("artists", []))
+    return f"{name} {artists}".strip()
+
+
+def _best_match(query: str, items: List[Dict[str, Any]], label_fn) -> Tuple[Dict[str, Any], float]:
+    """Spotify's search already ranks by relevance, but a very popular item with an
+    unrelated name can still outrank the one actually being asked for (this is the
+    main cause of "ponme X" playing something random). Re-score the handful of
+    candidates it returns by plain text similarity to what was actually asked for,
+    and only let Spotify's own ranking break ties.
+    """
+    scored = [(item, _similarity(query, label_fn(item))) for item in items]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored[0]
+
+
 # ------------------------------------------------------------------------- tools
 
 class _SpotifyTool(BaseTool):
@@ -268,7 +295,10 @@ class SpotifyPlayTool(_SpotifyTool):
         items = [i for i in resp.json().get(f"{kind}s", {}).get("items", []) if i]
         if not items:
             return self._fail(f"I found no {kind} for '{query}' on Spotify.")
-        top = items[0]
+        # Re-rank by text similarity to what was actually asked (see _best_match): Spotify's own
+        # relevance order sometimes puts a famous, unrelated result above the one being asked for.
+        label_fn = _track_label if kind in ("track", "album") else lambda it: it.get("name", "")
+        top, score = _best_match(query, items, label_fn)
         body = {"uris": [top["uri"]]} if kind == "track" else {"context_uri": top["uri"]}
         _ok(_call("PUT", "me/player/play", params={"device_id": device_id}, body=body))
         if shuffle is not None and kind != "track":
@@ -277,13 +307,21 @@ class SpotifyPlayTool(_SpotifyTool):
         if kind in ("track", "album"):
             artists = ", ".join(a["name"] for a in top.get("artists", [])[:2])
             label = f"{label} - {artists}" if artists else label
-        return self._ok_result(f"Playing {kind} '{label}' on {device_name}.", uri=top["uri"])
+        # Low similarity: the match is a guess (often because the query itself was likely
+        # mis-transcribed), so say so plainly instead of presenting it as a confident pick.
+        if score < 0.45:
+            return self._ok_result(
+                f"Not fully sure I understood '{query}' right, closest {kind} I found: '{label}' on {device_name}. "
+                "If that's not it, say the name again more clearly or spell it out.",
+                uri=top["uri"], match_confidence=score,
+            )
+        return self._ok_result(f"Playing {kind} '{label}' on {device_name}.", uri=top["uri"], match_confidence=score)
 
 
 @ToolRegistry.register("spotify_control")
 class SpotifyControlTool(_SpotifyTool):
     tool_id = "spotify_control"
-    _ACTIONS = ("pause", "resume", "next", "previous", "volume", "shuffle", "now_playing")
+    _ACTIONS = ("pause", "resume", "next", "previous", "volume", "shuffle", "now_playing", "like")
 
     @property
     def spec(self) -> ToolSpec:
@@ -291,8 +329,12 @@ class SpotifyControlTool(_SpotifyTool):
             name="spotify_control",
             description=(
                 "Control Sothe's current Spotify playback: pause, resume, next, previous, "
-                "volume (percent 0-100), shuffle (on true/false) and now_playing (what is playing "
-                "right now). Prefer this over media_control when Spotify is the player."
+                "volume (percent 0-100), shuffle (on true/false - use this for 'pon aleatorio'/'modo "
+                "aleatorio'/shuffle mode, even with nothing else requested), now_playing (what is "
+                "playing right now), and like (save a song to his Liked Songs / Favorites - 'ponlo en "
+                "favoritos', 'dale a me gusta', 'guarda esta cancion'). like with no 'query' saves the "
+                "song currently playing; with 'query' it searches that track and saves it instead, "
+                "without changing playback. Prefer this over media_control when Spotify is the player."
             ),
             parameters={
                 "type": "object",
@@ -300,6 +342,7 @@ class SpotifyControlTool(_SpotifyTool):
                     "action": {"type": "string", "enum": list(self._ACTIONS)},
                     "percent": {"type": "integer", "description": "Volume 0-100 for action=volume."},
                     "on": {"type": "boolean", "description": "For action=shuffle."},
+                    "query": {"type": "string", "description": "Optional track search text for action=like; omit to like the song currently playing."},
                 },
                 "required": ["action"],
             },
@@ -340,6 +383,8 @@ class SpotifyControlTool(_SpotifyTool):
                 pct = max(0, min(100, pct))
                 _ok(_call("PUT", "me/player/volume", params={"volume_percent": pct}))
                 return self._ok_result(f"Volume set to {pct}%.")
+            if action == "like":
+                return self._like(str(p.get("query", "") or "").strip())
             on = bool(p.get("on", True))
             _ok(_call("PUT", "me/player/shuffle", params={"state": str(on).lower()}))
             return self._ok_result(f"Shuffle {'on' if on else 'off'}.")
@@ -347,3 +392,26 @@ class SpotifyControlTool(_SpotifyTool):
             return self._fail(str(exc))
         except httpx.HTTPError as exc:
             return self._fail(f"Network problem talking to Spotify: {exc}")
+
+    def _like(self, query: str) -> ToolResult:
+        if query:
+            resp = _call("GET", "search", params={"q": _clean_query(query), "type": "track", "limit": 5})
+            _ok(resp)
+            items = [i for i in resp.json().get("tracks", {}).get("items", []) if i]
+            if not items:
+                return self._fail(f"I found no track for '{query}' on Spotify.")
+            track, score = _best_match(query, items, _track_label)
+        else:
+            resp = _call("GET", "me/player/currently-playing")
+            if resp.status_code == 204 or not (resp.json().get("item") if resp.status_code == 200 else None):
+                return self._fail("Nothing is playing right now, and no 'query' was given to search a track.")
+            _ok(resp)
+            track, score = resp.json()["item"], 1.0
+        label = _track_label(track)
+        _ok(_call("PUT", "me/tracks", params={"ids": track["id"]}))
+        if query and score < 0.45:
+            return self._ok_result(
+                f"Not fully sure I understood '{query}' right; saved the closest match to Liked Songs: '{label}'.",
+                track_id=track["id"], match_confidence=score,
+            )
+        return self._ok_result(f"Added '{label}' to your Liked Songs.", track_id=track["id"])

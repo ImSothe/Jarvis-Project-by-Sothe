@@ -139,6 +139,7 @@ OAUTH_PROVIDERS: Dict[str, OAuthProvider] = {
             "user-modify-playback-state",
             "user-read-currently-playing",
             "user-library-read",
+            "user-library-modify",  # for spotify_control action=like ("save to Liked Songs")
         ],
         setup_url="https://developer.spotify.com/dashboard",
         setup_hint=("Create an app, add redirect URI: http://127.0.0.1:8888/callback"),
