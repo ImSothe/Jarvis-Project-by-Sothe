@@ -24,7 +24,7 @@ from openjarvis.tools._stubs import BaseTool, ToolSpec
 
 LIBRARY_FILE = DEFAULT_CONFIG_DIR / "content" / "library.json"
 
-KINDS = ("idea", "script", "published", "lesson")
+KINDS = ("idea", "script", "published", "lesson", "reference")
 STATUSES = ("idea", "approved", "recorded", "edited", "scheduled", "published", "discarded")
 _LOCK = threading.Lock()
 _MAX_TEXT = 8000
