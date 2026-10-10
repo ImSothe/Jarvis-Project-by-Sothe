@@ -17,13 +17,14 @@ logger = logging.getLogger(__name__)
 
 # Priority order: Gemini first (this project's chosen native-audio provider),
 # then local, then other cloud fallbacks.
-TTS_BACKEND_ORDER = ("gemini_tts", "kokoro", "openai_tts", "cartesia")
+TTS_BACKEND_ORDER = ("edge_tts", "gemini_tts", "kokoro", "openai_tts", "cartesia")
 
 # Voice IDs are backend-specific and NOT portable. ``speech.voice_id`` applies
 # only to ``speech.tts_backend``; if synthesis falls back to another backend we
 # use that backend's own default rather than passing an unrecognized ID through.
 BACKEND_DEFAULT_VOICE = {
-    "gemini_tts": "Kore",  # clear, firm Gemini prebuilt voice
+    "edge_tts": "es-ES-AlvaroNeural",  # fixed male voice, Spanish from Spain
+    "gemini_tts": "Charon",  # male Gemini prebuilt voice
     "kokoro": "bm_george",  # British male
     "openai_tts": "onyx",  # deepest OpenAI preset
     "cartesia": "",  # no safe static default; let Cartesia choose

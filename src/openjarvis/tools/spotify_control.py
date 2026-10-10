@@ -193,7 +193,7 @@ class SpotifyPlayTool(_SpotifyTool):
         return ToolSpec(
             name="spotify_play",
             description=(
-                "Start music on Sothe's Spotify (Premium). what='liked' plays his Liked Songs "
+                "Use this for ANY request to play music, an artist, a song or his favourites, even when he says 'abre Spotify y pon X' (it starts the app by itself, so do not call open_app first). what='liked' plays his Liked Songs "
                 "(shuffled unless shuffle=false); what='artist'|'track'|'album'|'playlist' searches "
                 "'query' and plays the best match; what='resume' continues what was playing. "
                 "Starts the Spotify app if it is closed. Report the exact song or artist the tool "

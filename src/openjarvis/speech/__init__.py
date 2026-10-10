@@ -10,7 +10,7 @@ for _mod in ("faster_whisper", "openai_whisper", "deepgram", "gemini_stt"):
         pass
 
 # Optional TTS backends — each registers itself via @TTSRegistry.register()
-for _mod in ("cartesia_tts", "kokoro_tts", "openai_tts", "gemini_tts"):
+for _mod in ("cartesia_tts", "kokoro_tts", "openai_tts", "gemini_tts", "edge_tts_voice"):
     try:
         importlib.import_module(f".{_mod}", __name__)
     except ImportError:

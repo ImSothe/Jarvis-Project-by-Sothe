@@ -64,7 +64,7 @@ class OpenAppTool(BaseTool):
         return ToolSpec(
             name="open_app",
             description=(
-                "Open a desktop application on Sothe's PC. Only apps on his "
+                "Open a desktop application or game on Sothe's PC. Do NOT use it to play music: for any music request use spotify_play. Only apps on his "
                 f"approved list can be opened: {names}. For browsers you may "
                 "pass an http/https url to open that page."
             ),

@@ -52,6 +52,27 @@ export function isNoiseTranscript(text: string): boolean {
   return words.every((w) => NOISE_WORDS.has(w) || w.length <= 1);
 }
 
+// Only react when addressed. Audio from reels, videos or other people would
+// otherwise be transcribed and answered. Speech is accepted when it says the
+// assistant's name, or inside a short follow-up window after Jarvis last spoke
+// (so a normal back-and-forth does not need the name every time).
+const FIRST_TURN_WINDOW_MS = 20000;
+const FOLLOWUP_WINDOW_MS = 12000;
+// Speech-to-text mangles the name: jarvis, yarvis, harvis, jarbis, jarvi...
+const NAME_RE = /\b(?:j|y|h|g|ch)?[aá]r[vb](?:[iíy]s?|[iíy]z|[iíy])\b/i;
+
+export function mentionsJarvis(text: string): boolean {
+  return NAME_RE.test(text);
+}
+
+function requireName(): boolean {
+  try {
+    return localStorage.getItem('jarvis.requireName') !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 /** The model may answer with a silence marker when there is nothing to say. */
 export function isSilenceReply(reply: string): boolean {
   return /^\s*[\[(]?\s*silencio\s*[\])]?\s*\.?\s*$/i.test(reply);
@@ -146,6 +167,8 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
   // constants, so a noisier room or a hotter mic gain doesn't just silently
   // never trigger speech detection.
   const noiseFloorRef = useRef(0.01);
+  // Until this time (ms epoch) any speech counts as addressed to Jarvis.
+  const engagedUntilRef = useRef(0);
   const speechThreshold = useCallback(
     () => Math.max(SPEECH_RMS_THRESHOLD, noiseFloorRef.current * 2.5),
     [],
@@ -430,6 +453,12 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
         console.log('[jarvis-call] ignored noise transcript:', JSON.stringify(text));
         continue;
       }
+      const engaged = Date.now() < engagedUntilRef.current;
+      if (requireName() && !engaged && !mentionsJarvis(text)) {
+        console.log('[jarvis-call] ignored speech not addressed to Jarvis (reel, video, other people):', JSON.stringify(text));
+        continue;
+      }
+      engagedUntilRef.current = Date.now() + FOLLOWUP_WINDOW_MS;
 
       let reply = '';
       try {
@@ -475,6 +504,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       }
       // Let the room echo of Jarvis's last words die before the mic re-opens.
       await new Promise((r) => setTimeout(r, POST_SPEECH_PAUSE_MS));
+      engagedUntilRef.current = Date.now() + FOLLOWUP_WINDOW_MS; // he may answer without the name
       // Either way, loop back to 'listening' next iteration — on a natural
       // end that's the normal turn-taking; on a barge-in it's the point of
       // the feature (the words spoken during the cut itself aren't
@@ -572,6 +602,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       });
 
       activeRef.current = true;
+      engagedUntilRef.current = Date.now() + FIRST_TURN_WINDOW_MS; // he just pressed the button to talk
       useCallStore.getState().setActive(true);
       void loop();
     } catch (err) {
