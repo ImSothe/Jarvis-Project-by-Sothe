@@ -86,9 +86,16 @@ export default function App() {
   // one is picked. The old single attempt could leave "Pick a model first" stuck.
   useEffect(() => {
     if (selectedModel) return;
-    void ensureDefaultModel();
-    const id = setInterval(() => void ensureDefaultModel(), 3000);
-    return () => clearInterval(id);
+    // Back off 3s -> 30s so a setup with no cloud key doesn't hit the server forever.
+    let delay = 3000;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      await ensureDefaultModel();
+      delay = Math.min(30000, delay * 1.5);
+      timer = setTimeout(() => void tick(), delay);
+    };
+    void tick();
+    return () => clearTimeout(timer);
   }, [selectedModel]);
 
   // Fetch server info

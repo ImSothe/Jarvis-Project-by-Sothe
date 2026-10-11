@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +27,7 @@ from urllib.parse import quote, urlparse
 from openjarvis.core.config import DEFAULT_CONFIG_DIR
 from openjarvis.core.registry import ToolRegistry
 from openjarvis.core.types import ToolResult
+from openjarvis.tools._text import clean_query
 from openjarvis.tools._stubs import BaseTool, ToolSpec
 
 APPS_FILE = DEFAULT_CONFIG_DIR / "apps.json"
@@ -109,8 +109,7 @@ class OpenAppTool(BaseTool):
         template = str(entry.get("uri_template", ""))
         if template:
             # e.g. "spotify:search:{q}": the model only supplies a short, sanitized query.
-            q = re.sub(r"[^\w\s.\-&'ñÑáéíóúÁÉÍÓÚüÜ]", " ", str(params.get("query", "") or "")).strip()
-            q = re.sub(r"\s+", " ", q)[:60]
+            q = clean_query(params.get("query", ""), 60)
             if not q:
                 return ToolResult(
                     tool_name=self.tool_id,

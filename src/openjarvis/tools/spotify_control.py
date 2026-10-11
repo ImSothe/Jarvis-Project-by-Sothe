@@ -30,6 +30,7 @@ from openjarvis.core.config import DEFAULT_CONFIG_DIR
 from openjarvis.core.registry import ToolRegistry
 from openjarvis.core.types import ToolResult
 from openjarvis.tools._stubs import BaseTool, ToolSpec
+from openjarvis.tools._text import clean_query
 
 _API = "https://api.spotify.com/v1"
 _TOKEN_URL = "https://accounts.spotify.com/api/token"
@@ -171,8 +172,7 @@ def _pick_device() -> Tuple[str, str]:
 
 
 def _clean_query(text: Any) -> str:
-    q = re.sub(r"[^\w\s.\-&'ñÑáéíóúÁÉÍÓÚüÜ]", " ", str(text or ""))
-    return re.sub(r"\s+", " ", q).strip()[:80]
+    return clean_query(text, 80)
 
 
 def _normalize(text: str) -> str:

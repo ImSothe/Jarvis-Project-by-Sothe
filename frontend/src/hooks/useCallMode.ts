@@ -258,11 +258,13 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
   // What Jarvis last said, to recognise his own voice coming back through the mic.
   const lastReplyRef = useRef('');
   const speechThreshold = useCallback(
-    () => Math.max(SPEECH_RMS_THRESHOLD, noiseFloorRef.current * 2.5),
+    // Capped: `level` tops out at 1, so a threshold above it could never be crossed
+    // (0.3 * 3 for barge-in = 0.9 still leaves headroom).
+    () => Math.min(0.3, Math.max(SPEECH_RMS_THRESHOLD, noiseFloorRef.current * 2.5)),
     [],
   );
   const silenceThreshold = useCallback(
-    () => Math.max(SILENCE_RMS_THRESHOLD, noiseFloorRef.current * 1.6),
+    () => Math.min(0.25, Math.max(SILENCE_RMS_THRESHOLD, noiseFloorRef.current * 1.6)),
     [],
   );
 
@@ -369,7 +371,7 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       // Speakers leak Jarvis's own voice into the mic (echo cancellation is weak
       // on virtual mics), so barge-in must be well above the normal speech
       // threshold, sustained, and ignored during the first moments of playback.
-      const bargeThreshold = Math.max(BARGE_IN_MIN_LEVEL, speechThreshold() * 3);
+      const bargeThreshold = Math.min(0.9, Math.max(BARGE_IN_MIN_LEVEL, speechThreshold() * 3));
       const tick = () => {
         if (settled || !activeRef.current) return;
         analyser.getByteTimeDomainData(data);

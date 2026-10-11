@@ -9,6 +9,7 @@ created, updated.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -28,6 +29,41 @@ KINDS = ("idea", "script", "published", "lesson", "reference")
 STATUSES = ("idea", "approved", "recorded", "edited", "scheduled", "published", "discarded")
 _LOCK = threading.Lock()
 _MAX_TEXT = 8000
+
+
+@contextlib.contextmanager
+def _process_lock():
+    """Exclusive lock across processes (the research script runs outside the server).
+
+    ``_LOCK`` only serializes threads of one process; this OS-level file lock covers
+    the whole load -> modify -> save cycle between processes.
+    """
+    path = Path(LIBRARY_FILE).with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+b") as fh:
+        if os.name == "nt":
+            import msvcrt
+
+            fh.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)  # retries ~10s, then raises
+                    break
+                except OSError:
+                    continue
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _load() -> List[Dict[str, Any]]:
@@ -123,7 +159,7 @@ class ContentMemoryTool(BaseTool):
 
     def execute(self, **params: Any) -> ToolResult:
         action = str(params.get("action", "")).strip().lower()
-        with _LOCK:
+        with _LOCK, _process_lock():
             entries = _load()
             if action == "add":
                 return self._add(entries, params)

@@ -47,8 +47,8 @@ def server_ready() -> bool:
 
 
 def start_server() -> None:
-    if port_up(5173) or port_up(8000):
-        return  # something is already booting or running
+    if server_ready():
+        return  # the full stack is already running
     flags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP (DETACHED would leave powershell without a console)
     subprocess.Popen(
         ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
