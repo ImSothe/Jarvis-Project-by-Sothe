@@ -142,7 +142,9 @@ def main() -> None:
     import webview
     window = webview.create_window('Jarvis', html=SPLASH, width=1100, height=800, min_size=(700, 500),
                                    background_color='#000000')
-    webview.start(boot, window, gui='edgechromium', private_mode=False, storage_path=str(DATA / 'webview'))
+    # JARVIS_DEBUG=1 enables the developer tools (F12) in this window.
+    webview.start(boot, window, gui='edgechromium', private_mode=False, storage_path=str(DATA / 'webview'),
+                  debug=os.environ.get('JARVIS_DEBUG') == '1')
     del mutex
 
 

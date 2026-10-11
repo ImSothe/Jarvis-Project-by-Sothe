@@ -6,6 +6,8 @@ You say *"Jarvis, play Quevedo"* and it opens Spotify and plays it. You say *"Ja
 
 Under the hood it is an **AI agent with tools**: a language model (Gemini) decides which tool to use from what you ask, runs it on your machine, and tells you the result.
 
+> **Want your own?** Follow the step-by-step guide in **[SETUP.md](SETUP.md)**: where to put each key, which tools to enable and how to connect Spotify, Google, Instagram and the rest.
+
 > **Credit where it is due.** This project is built on top of the open-source [OpenJarvis](https://github.com/open-jarvis/OpenJarvis) framework (Stanford and contributors, Apache 2.0), which provides the engine, most of the code and most of the git history. My own work is the Windows personal-assistant layer described in [What I added](#what-i-added). See [Origin and credits](#origin-and-credits) for the exact split.
 
 ---
@@ -51,7 +53,7 @@ This Jarvis was built and tested on the **free tier** of everything. Wherever th
 |---|---|---|
 | Language model | OpenAI, Anthropic... | **Gemini** (free tier) |
 | Speech-to-text | Per-minute paid APIs | Gemini, plus a **local Whisper** (`faster-whisper`) for the privacy filter |
-| Jarvis's voice | Paid TTS | Gemini TTS, **Edge TTS** or **Kokoro** (local) |
+| Jarvis's voice | Paid TTS | **Gemini TTS**, or **Kokoro** (fully local) |
 | Web search | Tavily, You.com, Serply | **DuckDuckGo**, no key |
 | Video analysis | Paid video APIs | `yt-dlp` + the same Gemini key |
 | X (Twitter) analytics | The X API (paid) | **Files you export yourself**, no API |
@@ -209,8 +211,8 @@ You need:
 git clone https://github.com/ImSothe/Jarvis-Project-by-Sothe.git
 cd Jarvis-Project-by-Sothe
 
-# Backend
-uv pip install -e .
+# Backend (creates .venv and installs everything)
+uv sync --extra desktop
 
 # Interface
 cd frontend
@@ -222,7 +224,9 @@ The first time speech is used, the Whisper models are downloaded (about 150 MB f
 
 ## Configuration
 
-1. Copy the template and add your key. **This is the only required step.**
+> The short version is below. The full walkthrough, with step-by-step instructions for every integration, is in **[SETUP.md](SETUP.md)**.
+
+1. Copy the template and add your key. **This is the only required key.**
 
    ```powershell
    copy .env.example .env
@@ -244,14 +248,21 @@ The first time speech is used, the Whisper models are downloaded (about 150 MB f
    | `OPENWEATHERMAP_API_KEY` | Weather (free OpenWeatherMap key) |
    | `SOTHE_OPTIMIZER_DIR` | Folder read by `optimizer_info` |
 
-3. For Gmail, Calendar or Spotify, authorize your account once:
+3. **Enable the tools.** Out of the box the agent can only use `think`, `calculator` and `web_search`. Copy the ready-made list that turns on all the Jarvis features:
+
+   ```powershell
+   mkdir $env:USERPROFILE\.openjarvis -Force
+   copy config.example.toml $env:USERPROFILE\.openjarvis\config.toml
+   ```
+
+4. For Gmail, Calendar or Spotify, authorize your account once:
 
    ```powershell
    .\jarvis-terminal.ps1 connect gmail
    .\jarvis-terminal.ps1 connect spotify
    ```
 
-4. The instructions and tools are written for **a single user** (the author). If you use it yourself, adapt the texts in `src/openjarvis/tools/` and your approved-apps list in `~/.openjarvis/apps.json`.
+5. The instructions and tools are written for **a single user** (the author). If you use it yourself, adapt the texts in `src/openjarvis/tools/` and your approved-apps list in `~/.openjarvis/apps.json`.
 
 ## Usage
 
@@ -270,7 +281,7 @@ Open the app and say, for example:
 
 Sentences that do **not** start with "Jarvis" are ignored.
 
-Useful switches (set in the browser storage of the app): `jarvis.autoConnect = false` to disable auto-connect, and `jarvis.requireName = false` to answer without the wake word.
+Two advanced switches (disable auto-connect, answer without the wake word) are explained in [SETUP.md](SETUP.md#6-turn-on-voice).
 
 ## Security and privacy
 
@@ -293,6 +304,8 @@ Useful switches (set in the browser storage of the app): `jarvis.autoConnect = f
 
 | Path | Contents |
 |---|---|
+| `SETUP.md` | Step-by-step guide to configure your own Jarvis |
+| `config.example.toml` | Example config that enables all the tools (copy to `~/.openjarvis/config.toml`) |
 | `jarvis_app.pyw` | Desktop app (WebView2 window) |
 | `start-jarvis.ps1`, `make-jarvis-shortcut.ps1` | Launch scripts and shortcuts |
 | `src/openjarvis/tools/` | Tools (`spotify_control`, `open_app`, `pc_control`, `obs_control`, `install_app`, `instagram`, `x_analytics`, `site_trust`, `music_vocab`...) |

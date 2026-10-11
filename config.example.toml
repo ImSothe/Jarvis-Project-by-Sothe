@@ -1,0 +1,54 @@
+# Example configuration for Jarvis Project by Sothe.
+#
+# Copy this file to  C:\Users\<you>\.openjarvis\config.toml
+#   copy config.example.toml $env:USERPROFILE\.openjarvis\config.toml
+# (create the .openjarvis folder first if it does not exist).
+#
+# Everything not listed here keeps its default. See SETUP.md for the full guide.
+
+[tools]
+# The tools Jarvis is allowed to use. The built-in default is only: think, calculator, web_search,
+# so WITHOUT this list none of the Jarvis features below are available.
+# Remove a line to switch a tool off. Tools whose service you have not connected simply
+# report that they are not connected.
+enabled = [
+  # Basics
+  "think", "calculator", "web_search",
+
+  # Music and media (Windows)
+  "spotify_play", "spotify_control", "media_control",
+
+  # PC control (Windows)
+  "open_app", "pc_control", "obs_control", "install_app",
+
+  # Google (needs `connect gmail`, see SETUP.md)
+  "gmail_search_emails", "gmail_list_unread", "gmail_get_thread",
+  "calendar_get_events_today", "calendar_search_events", "calendar_next_meeting", "calendar_create_event",
+
+  # Content and social
+  "instagram_account_overview", "instagram_recent_posts", "instagram_post_insights",
+  "x_analytics", "find_viral_videos", "analyze_video", "content_memory",
+
+  # Extras
+  "check_site_trust", "memory_manage",
+
+  # Optional, add them if you want them:
+  # "get_weather",          # needs OPENWEATHERMAP_API_KEY
+  # "optimizer_info",       # reads the author's own optimizer project; skip unless you adapt it
+]
+
+# Deliberately NOT enabled, because they can act on their own:
+#   "gmail_send_email"  - lets Jarvis send email from your account
+#   "shell_exec"        - lets Jarvis run commands on your PC
+# Add them to the list above only if you understand the risk.
+
+[speech]
+# Jarvis's voice. "gemini_tts" is free with your Gemini key.
+# Other options: "kokoro" (local, needs the `voice` extra) and "edge_tts" (see SETUP.md).
+tts_backend = "gemini_tts"
+voice_id = "Kore"        # try Kore, Algenib, Puck, Charon, Fenrir...
+voice_speed = 1.0
+
+[system_prompt]
+# If you write a long SOUL.md (personality file), raise this so it is not cut in the middle.
+soul_max_chars = 24000
