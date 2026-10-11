@@ -22,7 +22,7 @@ from openjarvis.core.registry import ToolRegistry
 from openjarvis.core.types import ToolResult
 from openjarvis.tools._stubs import BaseTool, ToolSpec
 
-_DEFAULT_DIR = r"~\Documents\Proyectos\Sothe-Optimizer"
+_DEFAULT_DIR = str(Path.home() / "Documents" / "Proyectos" / "Sothe-Optimizer")
 _OVERVIEW = DEFAULT_CONFIG_DIR / "knowledge" / "sothe_optimizer_overview.md"
 _MAX_RESULTS = 25
 
