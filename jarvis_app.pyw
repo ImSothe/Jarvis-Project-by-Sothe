@@ -134,6 +134,10 @@ def main() -> None:
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
         focus_existing()
         return
+    # WebView2 freezes timers/audio of a covered or minimized window; voice and autostart need it awake.
+    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
+        '--disable-background-timer-throttling --disable-renderer-backgrounding '
+        '--disable-backgrounding-occluded-windows --disable-features=CalculateNativeWinOcclusion')
     import webview
     window = webview.create_window('Jarvis', html=SPLASH, width=1100, height=800, min_size=(700, 500),
                                    background_color='#000000')
