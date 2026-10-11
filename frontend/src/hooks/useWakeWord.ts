@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { mentionsJarvis } from './useCallMode';
 
 // Vendor-prefixed SpeechRecognition isn't in lib.dom.d.ts; typed loosely
 // rather than pulling in a whole ambient-types package for one browser API.
@@ -73,7 +74,8 @@ export function useWakeWord(wakeWord: string, onWake: () => void, enabled: boole
     recognition.onresult = (event: any) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = normalize(event.results[i][0].transcript as string);
-        if (transcript.includes(wakeWordRef.current)) {
+        // es-ES often writes the name as yarvis/jarbis/harvis: use the same tolerant matcher as call mode.
+        if (transcript.includes(wakeWordRef.current) || mentionsJarvis(transcript)) {
           onWakeRef.current();
           return;
         }
