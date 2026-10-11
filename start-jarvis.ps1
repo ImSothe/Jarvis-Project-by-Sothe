@@ -32,11 +32,11 @@ uv sync --frozen --extra desktop --inexact 2>&1 | Out-Null
 # Optional runtime packages that are not in pyproject (changing pyproject would make `uv run`
 # try to replace jarvis.exe while it is running). Install them once if missing.
 $venvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
-foreach ($pkg in @(@{ mod = 'google.genai'; pip = 'google-genai' }, @{ mod = 'edge_tts'; pip = 'edge-tts' }, @{ mod = 'webview'; pip = 'pywebview' }, @{ mod = 'obsws_python'; pip = 'obsws-python' }, @{ mod = 'pycaw'; pip = 'pycaw' }, @{ mod = 'psutil'; pip = 'psutil' })) {
+foreach ($pkg in @(@{ mod = 'google.genai'; pip = 'google-genai' }, @{ mod = 'edge_tts'; pip = 'edge-tts' }, @{ mod = 'webview'; pip = 'pywebview' }, @{ mod = 'obsws_python'; pip = 'obsws-python' }, @{ mod = 'pycaw'; pip = 'pycaw' }, @{ mod = 'psutil'; pip = 'psutil' }, @{ mod = 'winrt.windows.media.control'; pip = 'winrt-Windows.Media.Control winrt-Windows.Foundation winrt-Windows.Foundation.Collections winrt-runtime' })) {
     & $venvPy -c "import $($pkg.mod)" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Installing $($pkg.pip)..."
-        uv pip install $pkg.pip 2>&1 | Out-Null
+        uv pip install ($pkg.pip -split ' ') 2>&1 | Out-Null
     }
 }
 $ErrorActionPreference = $prevEap

@@ -136,12 +136,66 @@ def _devices() -> List[Dict[str, Any]]:
     return resp.json().get("devices", [])
 
 
+_SPOTIFY_EXE = Path(os.environ.get("APPDATA", "")) / "Spotify" / "Spotify.exe"
+_BROWSER_HINTS = ("brave", "chrome", "msedge", "edge", "firefox", "opera", "vivaldi")
+_SW_SHOWMINNOACTIVE = 7
+
+
 def _start_desktop_app() -> None:
-    if sys.platform == "win32":
+    """Start Spotify without taking the focus, so a game in the foreground is not minimized."""
+    if sys.platform != "win32":
+        return
+    if _SPOTIFY_EXE.exists():
         try:
-            os.startfile("spotify:")  # type: ignore[attr-defined]  # noqa: S606
+            import subprocess
+
+            info = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
+            info.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
+            info.wShowWindow = _SW_SHOWMINNOACTIVE
+            subprocess.Popen(  # noqa: S603
+                [str(_SPOTIFY_EXE), "--minimized"], startupinfo=info, close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return
         except OSError:
             pass
+    try:
+        os.startfile("spotify:")  # type: ignore[attr-defined]  # noqa: S606
+    except OSError:
+        pass
+
+
+async def _pause_browser_media_async() -> int:
+    from winrt.windows.media.control import (
+        GlobalSystemMediaTransportControlsSessionManager as Manager,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
+    )
+
+    manager = await Manager.request_async()
+    paused = 0
+    for session in manager.get_sessions():
+        app = (session.source_app_user_model_id or "").lower()
+        if not any(hint in app for hint in _BROWSER_HINTS):
+            continue
+        if session.get_playback_info().playback_status == Status.PLAYING:
+            if await session.try_pause_async():
+                paused += 1
+    return paused
+
+
+def _pause_browser_media() -> int:
+    """Pause a video playing in the browser (YouTube...) before music starts. Best effort."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        import asyncio
+        import concurrent.futures
+
+        # Own thread: this may be called from inside a running event loop.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(_pause_browser_media_async())).result(timeout=5)
+    except Exception:  # noqa: BLE001 - missing winrt or no media session must never block the music
+        return 0
 
 
 def _pick_device() -> Tuple[str, str]:
@@ -242,6 +296,7 @@ class SpotifyPlayTool(_SpotifyTool):
     def execute(self, **p: Any) -> ToolResult:
         what = str(p.get("what", "")).strip().lower()
         try:
+            _pause_browser_media()
             device_id, device_name = _pick_device()
             if what == "resume":
                 _ok(_call("PUT", "me/player/play", params={"device_id": device_id}))
