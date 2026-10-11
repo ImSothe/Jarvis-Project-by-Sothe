@@ -365,6 +365,10 @@ export interface TranscriptionResult {
   language: string | null;
   confidence: number | null;
   duration_seconds: number;
+  /** Set when the local name check rejected the clip: it was not sent to the cloud. */
+  gated?: boolean;
+  /** What the local model heard, for the "ignored" notice. */
+  heard?: string;
 }
 
 export interface SpeechHealth {
@@ -373,7 +377,11 @@ export interface SpeechHealth {
   reason?: string;
 }
 
-export async function transcribeAudio(audioBlob: Blob, filename = 'recording.webm'): Promise<TranscriptionResult> {
+export async function transcribeAudio(
+  audioBlob: Blob,
+  filename = 'recording.webm',
+  opts: { requireName?: boolean } = {},
+): Promise<TranscriptionResult> {
   if (isTauri()) {
     try {
       const buffer = await audioBlob.arrayBuffer();
@@ -388,6 +396,7 @@ export async function transcribeAudio(audioBlob: Blob, filename = 'recording.web
   }
   const formData = new FormData();
   formData.append('file', audioBlob, filename);
+  if (opts.requireName) formData.append('gate', 'name'); // server checks locally for "Jarvis" first
   const res = await apiFetch(`/v1/speech/transcribe`, {
     method: 'POST',
     body: formData,

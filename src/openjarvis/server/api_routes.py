@@ -1009,6 +1009,21 @@ async def transcribe_speech(request: Request):
     filename = getattr(audio_file, "filename", "audio.wav")
     ext = filename.rsplit(".", 1)[-1] if "." in filename else "wav"
 
+    # Optional local gate: skip the (paid) cloud transcription unless the clip starts with "Jarvis".
+    if form.get("gate") == "name":
+        from openjarvis.speech.name_gate import check_name
+
+        gated = await asyncio.to_thread(check_name, audio_bytes, ext)
+        if gated is not None and not gated.heard_name:
+            return {
+                "text": "",
+                "language": None,
+                "confidence": None,
+                "duration_seconds": 0.0,
+                "gated": True,
+                "heard": gated.text,
+            }
+
     try:
         result = await asyncio.to_thread(
             backend.transcribe,

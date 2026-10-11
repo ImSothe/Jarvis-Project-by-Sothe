@@ -527,7 +527,15 @@ export function useCallMode(sendTurn: (text: string) => Promise<string>) {
       useCallStore.getState().setLevel(0);
       let text = '';
       try {
-        const result = await transcribeAudio(blob);
+        // Ask the server to check locally for the name first, unless we are waiting for the rest of
+        // "Jarvis ... <request>" (that follow-up has no name and must go through).
+        const gate = requireName() && Date.now() >= pendingNameUntilRef.current;
+        const result = await transcribeAudio(blob, 'recording.webm', { requireName: gate });
+        if (result.gated) {
+          console.log('[jarvis-call] local check: no "Jarvis" at the start, not sent to the cloud:', JSON.stringify(result.heard));
+          showNotice(`Ignorado, no dijiste «Jarvis»: «${clip(result.heard ?? '')}»`);
+          continue;
+        }
         text = result.text?.trim() ?? '';
         console.log('[jarvis-call] STT received:', JSON.stringify(text));
       } catch (err) {
