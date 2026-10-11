@@ -28,6 +28,17 @@ from openjarvis.tools._stubs import BaseTool, ToolSpec
 
 _BOOTSTRAP_URL = "https://data.iana.org/rdap/dns.json"
 _DOMAIN_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$")
+# Two-label public suffixes (ccTLD + generic second level) where the registrable domain is
+# actually THREE labels (e.g. "shop.co.uk", not "co.uk"). Not exhaustive, but covers the
+# common ones well enough that a trust check on a .co.uk/.com.au/etc. shop checks the shop
+# itself instead of the registry's own apex domain.
+_TWO_LABEL_SUFFIXES = {
+    "co.uk", "org.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk", "sch.uk",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au",
+    "co.jp", "or.jp", "ne.jp", "ac.jp",
+    "com.br", "com.mx", "com.ar", "com.es", "com.cn", "com.tr", "com.sg", "com.hk",
+    "co.nz", "co.za", "co.in", "co.kr", "co.il",
+}
 # TLDs with a long track record of cheap/free, throwaway registration abused by scam shops.
 # A match is one yellow flag among several, never disqualifying by itself.
 _RISKY_TLDS = {
@@ -61,9 +72,15 @@ def _extract_domain(raw: str) -> Optional[str]:
     if "://" not in raw:
         raw = "https://" + raw
     host = (urlparse(raw).hostname or "").strip(".")
-    # the registrable domain (last two labels) is what RDAP indexes; a bare host is fine too
+    # the registrable domain is what RDAP indexes; normally the last two labels, but for a
+    # two-label public suffix (co.uk, com.au...) it's the last THREE (shop.co.uk, not co.uk)
     parts = host.split(".")
-    domain = ".".join(parts[-2:]) if len(parts) >= 2 else host
+    if len(parts) >= 3 and ".".join(parts[-2:]) in _TWO_LABEL_SUFFIXES:
+        domain = ".".join(parts[-3:])
+    elif len(parts) >= 2:
+        domain = ".".join(parts[-2:])
+    else:
+        domain = host
     return domain if _DOMAIN_RE.match(domain) else None
 
 

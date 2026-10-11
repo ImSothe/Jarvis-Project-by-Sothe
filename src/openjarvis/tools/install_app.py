@@ -96,6 +96,9 @@ class InstallAppTool(BaseTool):
                 "required": ["action"],
             },
             category="system",
+            # winget's own search/list subprocess call can take up to 60s (slow connection,
+            # first-run source sync); give the executor room for that instead of racing it.
+            timeout_seconds=75.0,
         )
 
     def _ok(self, msg: str, **meta: Any) -> ToolResult:

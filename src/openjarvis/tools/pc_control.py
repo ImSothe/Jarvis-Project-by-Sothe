@@ -77,6 +77,9 @@ class PcControlTool(BaseTool):
                 "required": ["action"],
             },
             category="system",
+            # screenshot's own PowerShell subprocess already budgets 30s; give the executor
+            # room beyond that instead of both timeouts racing each other.
+            timeout_seconds=45.0,
         )
 
     def _ok(self, msg: str) -> ToolResult:

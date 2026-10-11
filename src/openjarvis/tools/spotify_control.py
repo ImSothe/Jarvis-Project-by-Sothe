@@ -403,10 +403,13 @@ class SpotifyControlTool(_SpotifyTool):
             track, score = _best_match(query, items, _track_label)
         else:
             resp = _call("GET", "me/player/currently-playing")
-            if resp.status_code == 204 or not (resp.json().get("item") if resp.status_code == 200 else None):
+            if resp.status_code == 204:
                 return self._fail("Nothing is playing right now, and no 'query' was given to search a track.")
-            _ok(resp)
-            track, score = resp.json()["item"], 1.0
+            _ok(resp)  # raises/reports the real error for 401/403/5xx instead of masking it as "nothing playing"
+            item = resp.json().get("item")
+            if not item:
+                return self._fail("Nothing is playing right now, and no 'query' was given to search a track.")
+            track, score = item, 1.0
         label = _track_label(track)
         _ok(_call("PUT", "me/tracks", params={"ids": track["id"]}))
         if query and score < 0.45:

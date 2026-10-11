@@ -22,6 +22,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+try:
+    import psutil
+except ImportError:  # pragma: no cover - psutil ships with pc_control's deps
+    psutil = None  # type: ignore[assignment]
+
 from openjarvis.core.registry import ToolRegistry
 from openjarvis.core.types import ToolResult
 from openjarvis.tools._stubs import BaseTool, ToolSpec
@@ -54,6 +59,23 @@ def _port_open(port: int) -> bool:
         with socket.create_connection((_HOST, port), timeout=0.5):
             return True
     except OSError:
+        return False
+
+
+def _obs_process_running() -> bool:
+    """True if an obs64.exe process exists, even mid-boot before its websocket answers.
+
+    _port_open alone says "not running" during that window, which made a cold-starting OBS
+    get launched a SECOND time (two instances fighting over capture devices).
+    """
+    if psutil is None:
+        return False
+    try:
+        return any(
+            str(p.info.get("name", "")).lower() == "obs64.exe"
+            for p in psutil.process_iter(["name"])
+        )
+    except psutil.Error:
         return False
 
 
@@ -135,6 +157,9 @@ class ObsControlTool(BaseTool):
                 "required": ["action"],
             },
             category="system",
+            # Cold-starting OBS is given up to 45s to answer (see _connect); the executor's
+            # default 30s would otherwise kill this tool before that wait finishes.
+            timeout_seconds=60.0,
         )
 
     def _fail(self, msg: str) -> ToolResult:
@@ -151,8 +176,9 @@ class ObsControlTool(BaseTool):
         if not cfg["enabled"]:
             return self._fail("OBS WebSocket server is disabled. Enable it in OBS: Tools > WebSocket Server Settings.")
 
+        already_booting = _obs_process_running()  # process exists but the websocket isn't up yet
         started = False
-        if not _port_open(cfg["port"]):
+        if not _port_open(cfg["port"]) and not already_booting:
             err = _launch_obs()
             if err:
                 return self._fail(err)
@@ -163,7 +189,7 @@ class ObsControlTool(BaseTool):
             return ToolResult(tool_name=self.tool_id, content="OBS was already running.", success=True)
 
         try:
-            cl = _connect(cfg["port"], cfg["password"], wait_s=45 if started else 8)
+            cl = _connect(cfg["port"], cfg["password"], wait_s=45 if (started or already_booting) else 8)
         except Exception as exc:
             return self._fail(str(exc))
         prefix = "OBS was closed, I opened it. " if started else ""
