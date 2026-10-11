@@ -291,6 +291,11 @@ def create_app(
     app.state._owns_memory_backend = bool(own_memory_backend)
     app.state.memory_service = memory_service
     app.state.speech_backend = speech_backend
+    if speech_backend is not None:
+        # Load the local "does it start with Jarvis?" models now, so the first command is not slow.
+        from openjarvis.speech.name_gate import warm_up
+
+        threading.Thread(target=warm_up, daemon=True, name="name-gate-warmup").start()
     app.state.agent_manager = agent_manager
     app.state.agent_scheduler = agent_scheduler
     # Security primitives for the managed-agent HTTP/SSE routes
