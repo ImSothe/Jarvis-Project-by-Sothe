@@ -15,9 +15,11 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import os
 import re
 from typing import Any, Callable, List, Optional
 
+from openjarvis.agents import tool_router
 from openjarvis.agents._stubs import AgentContext, AgentResult, ToolUsingAgent
 from openjarvis.core.events import EventBus
 from openjarvis.core.registry import AgentRegistry
@@ -228,6 +230,19 @@ class OrchestratorAgent(ToolUsingAgent):
         # Max turns exceeded
         return self._max_turns_result(all_tool_results, turns)
 
+    @staticmethod
+    def _routing_seed(input: str, context: Optional[AgentContext]) -> set[str]:
+        """Tools to send first: from the request, the last few user turns, and tools just used."""
+        text = [input]
+        names: set[str] = set()
+        if context is not None:
+            for m in list(context.conversation.messages)[-8:]:
+                if m.role == Role.USER and m.content:
+                    text.append(m.content)
+                for tc in getattr(m, "tool_calls", None) or []:
+                    names.add(tc.name)
+        return tool_router.initial_tool_names(" ".join(text)) | names
+
     def _normalize_structured_tool_input(
         self,
         tool_name: str,
@@ -357,8 +372,15 @@ class OrchestratorAgent(ToolUsingAgent):
             system_prompt=self._system_prompt,
         )
 
-        # Get OpenAI-format tool definitions
-        openai_tools = self._executor.get_openai_tools() if self._tools else []
+        # Get OpenAI-format tool definitions. Only the ones this request can need are sent
+        # (see tool_router): all of them cost ~12k tokens on every single request.
+        all_openai_tools = self._executor.get_openai_tools() if self._tools else []
+        routed = (
+            len(all_openai_tools) > tool_router.MIN_TOOLS_TO_ROUTE
+            and os.environ.get("JARVIS_ROUTE_TOOLS", "1") != "0"
+        )
+        active_tools: set[str] = self._routing_seed(input, context) if routed else set()
+        openai_tools = all_openai_tools
 
         all_tool_results: list[ToolResult] = []
         turns = 0
@@ -373,6 +395,8 @@ class OrchestratorAgent(ToolUsingAgent):
 
             # Build generate kwargs
             gen_kwargs: dict[str, Any] = {}
+            if routed:
+                openai_tools = tool_router.filter_tools(all_openai_tools, active_tools)
             if openai_tools:
                 gen_kwargs["tools"] = openai_tools
 
@@ -420,6 +444,32 @@ class OrchestratorAgent(ToolUsingAgent):
                     tool_calls=tool_calls,
                 )
             )
+
+            # The model asked for more tool groups: load them and answer that call here.
+            if routed and any(tc.name == tool_router.MORE_TOOLS for tc in tool_calls):
+                for tc in tool_calls:
+                    if tc.name != tool_router.MORE_TOOLS:
+                        continue
+                    try:
+                        groups = json.loads(tc.arguments or "{}").get("groups", [])
+                    except (json.JSONDecodeError, AttributeError):
+                        groups = []
+                    loaded = tool_router.tools_for_groups(groups)
+                    active_tools |= loaded
+                    messages.append(
+                        Message(
+                            role=Role.TOOL,
+                            content=(
+                                "Tools loaded: " + ", ".join(sorted(loaded))
+                                if loaded else "No such group; nothing loaded."
+                            ),
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                        )
+                    )
+                tool_calls = [tc for tc in tool_calls if tc.name != tool_router.MORE_TOOLS]
+                if not tool_calls:
+                    continue
 
             # Execute each tool (with loop guard check) and append results
             if self._parallel_tools and len(tool_calls) > 1:
