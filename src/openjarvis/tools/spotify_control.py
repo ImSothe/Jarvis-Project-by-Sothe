@@ -30,6 +30,7 @@ from openjarvis.core.config import DEFAULT_CONFIG_DIR
 from openjarvis.core.registry import ToolRegistry
 from openjarvis.core.types import ToolResult
 from openjarvis.tools._stubs import BaseTool, ToolSpec
+from openjarvis.tools import music_vocab
 from openjarvis.tools._text import clean_query
 
 _API = "https://api.spotify.com/v1"
@@ -343,6 +344,8 @@ class SpotifyPlayTool(_SpotifyTool):
     def _play_search(self, device_id: str, device_name: str, kind: str, query: str, shuffle: Any) -> ToolResult:
         if not query:
             return self._fail("A search text is required in 'query'.")
+        if kind == "artist":
+            query = music_vocab.correct_query(query)  # "Ponquevedos" / "pon que veo" -> Quevedo
         resp = _call("GET", "search", params={"q": query, "type": kind, "limit": 5})
         if resp.status_code == 400:  # some app tiers cap the limit
             resp = _call("GET", "search", params={"q": query, "type": kind, "limit": 1})

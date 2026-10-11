@@ -22,6 +22,20 @@ _TRANSCRIBE_PROMPT = (
 )
 
 
+def _vocab_hint() -> str:
+    """Names the speaker is likely to say, so they are spelled right (Quevedo, not 'que vedo')."""
+    hint = ' The speaker talks to an assistant named "Jarvis".'
+    try:
+        from openjarvis.tools.music_vocab import load_names
+
+        names = load_names(60)
+    except Exception:  # noqa: BLE001 - a hint, never a reason to fail a transcription
+        names = []
+    if names:
+        hint += " Artists they often ask for (use exactly this spelling if one is said): " + ", ".join(names) + "."
+    return hint
+
+
 @SpeechRegistry.register("gemini")
 class GeminiSpeechBackend(SpeechBackend):
     """Speech-to-text using a Gemini multimodal model's native audio input."""
@@ -54,7 +68,7 @@ class GeminiSpeechBackend(SpeechBackend):
             raise RuntimeError("Gemini client not initialized (missing API key?)")
 
         ext = format[1:] if format.startswith(".") else format
-        prompt = _TRANSCRIBE_PROMPT
+        prompt = _TRANSCRIBE_PROMPT + _vocab_hint()
         if language:
             prompt += f" The spoken language is {language}."
 

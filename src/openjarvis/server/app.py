@@ -294,8 +294,10 @@ def create_app(
     if speech_backend is not None:
         # Load the local "does it start with Jarvis?" models now, so the first command is not slow.
         from openjarvis.speech.name_gate import warm_up
+        from openjarvis.tools.music_vocab import refresh as refresh_music_vocab
 
         threading.Thread(target=warm_up, daemon=True, name="name-gate-warmup").start()
+        threading.Thread(target=refresh_music_vocab, daemon=True, name="music-vocab").start()
     app.state.agent_manager = agent_manager
     app.state.agent_scheduler = agent_scheduler
     # Security primitives for the managed-agent HTTP/SSE routes
