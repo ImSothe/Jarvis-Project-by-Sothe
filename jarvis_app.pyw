@@ -137,7 +137,8 @@ def main() -> None:
     # WebView2 freezes timers/audio of a covered or minimized window; voice and autostart need it awake.
     os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
         '--disable-background-timer-throttling --disable-renderer-backgrounding '
-        '--disable-backgrounding-occluded-windows --disable-features=CalculateNativeWinOcclusion')
+        '--disable-backgrounding-occluded-windows --disable-features=CalculateNativeWinOcclusion '
+        '--autoplay-policy=no-user-gesture-required')  # lets the voice start without a click
     import webview
     window = webview.create_window('Jarvis', html=SPLASH, width=1100, height=800, min_size=(700, 500),
                                    background_color='#000000')
