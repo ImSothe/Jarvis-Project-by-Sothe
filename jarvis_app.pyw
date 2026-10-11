@@ -130,7 +130,7 @@ def boot(window) -> None:
 
 def main() -> None:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(AUMID)
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, 'Local\Sothe.Jarvis.App')
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, r'Local\Sothe.Jarvis.App')
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
         focus_existing()
         return
