@@ -21,14 +21,15 @@ Under the hood it is an **AI agent with tools**: a language model (Gemini) decid
 5. [What was added for Gemini, calls and Google (TenMM2)](#what-was-added-for-gemini-calls-and-google-tenmm2)
 6. [What I added](#what-i-added)
 7. [Everything Jarvis can do (tool reference)](#everything-jarvis-can-do-tool-reference)
-8. [How it works](#how-it-works)
-9. [Installation](#installation)
-10. [Configuration](#configuration)
-11. [Usage](#usage)
-12. [Security and privacy](#security-and-privacy)
-13. [Limitations](#limitations)
-14. [Project structure](#project-structure)
-15. [License](#license)
+8. [Bugs found and fixed](#bugs-found-and-fixed)
+9. [How it works](#how-it-works)
+10. [Installation](#installation)
+11. [Configuration](#configuration)
+12. [Usage](#usage)
+13. [Security and privacy](#security-and-privacy)
+14. [Limitations](#limitations)
+15. [Project structure](#project-structure)
+16. [License](#license)
 
 ---
 
@@ -188,6 +189,55 @@ New automated tests for the tool router, the speech privacy filter, the music vo
 
 ### Everything else from OpenJarvis
 Shell and code execution, file read/write, git, database queries, HTTP requests, browser automation, PDF and image tools, text-to-speech, calculator, memory, knowledge graph, knowledge search and more.
+
+## Bugs found and fixed
+
+Real problems found while using Jarvis every day, with how each one was diagnosed and fixed. The numbers are measured, not estimated, and each fix has tests. Where something is not fully verified, it says so.
+
+### 1. "Jarvis said it paused Spotify when it had not"
+
+- **Cause.** Every voice turn resent the *entire* conversation, as plain text and without the tool calls behind each reply. After a few turns the model started copying its own earlier answers ("Spotify pausado, silencio en cabina") instead of calling the tool, so nothing happened. It was found by auditing the request traces: one reply had no tool call at all and was word for word the same as one from 18 minutes earlier. Every request also got more expensive as the chat went on.
+- **Fix, in three layers.**
+  1. Voice turns now carry only the last 8 messages (`trimCallHistory`).
+  2. The call prompt forbids claiming an action that no tool performed in that turn.
+  3. The agent loop (`agents/action_guard.py`) sends the model back **once** when a command gets a reply that claims an action but no tool ran. It only triggers when the request looks like a command *and* the reply reads like a finished action, so normal answers are never retried.
+- **Verified.** Replayed the failing conversation (a history full of copied "paused" replies) against the running server: the tool was called both times, and when Spotify failed, Jarvis said so instead of inventing success. Unit tests cover the guard and the history cap. A request with a tool call went from about 34,000 to about 27,500 tokens.
+
+### 2. "Jarvis took 22 to 28 seconds to start"
+
+- **Cause.** Startup checked every local AI engine (Ollama, vLLM, LM Studio and others, 11 in total). Each one that is not installed costs a roughly 4 second timeout on Windows, and the check ran more than once.
+- **Fix.** `JARVIS_ENGINES` limits which engines are checked. The launcher defaults it to `cloud,nim`; set your own value if you run a local engine.
+- **Verified.** Timed the exact startup path: engine selection went from **12.2 s to 0.6 s**, and the window is ready in about 12 to 15 s.
+
+### 3. "Jarvis ignored me even when I said his name"
+
+- **Cause.** The local filter that decides whether a sentence starts with "Jarvis" only accepted names very close to it. Whisper often writes "Travis", "Cervis" or "Jertis". The call mode would have ignored those too.
+- **Fix.** Both the server filter and the interface accept anything shaped like the name (jarcis, martis, harvis, harvey...) plus letter-swapped variants. Clips shorter than 1.5 seconds always pass, so a lone "Jarvis" is never blocked. Ordinary words such as *parte* or *martes* still do not match.
+- **Verified.** 10 out of 10 on an audio test against the live server (variants of the name, a lone "Jarvis", and normal sentences), plus unit tests. *Caveat: the audio used a synthetic voice, not a real microphone.*
+
+### 4. "It cut me off when I paused to think"
+
+- **Cause.** A sentence ended after 0.8 to 1.1 seconds of silence.
+- **Fix.** It now waits 2.2 seconds, so a 2 second pause does not cut the request. The maximum turn length went from 15 to 20 seconds. Space still sends immediately. The price is about 1.4 s more before Jarvis starts answering.
+- **Verified.** The new values are confirmed in the served build. *Not tested with a live microphone.*
+
+### 5. A stray console window on Windows (upstream OpenJarvis)
+
+- **Cause.** The background server was spawned with `DETACHED_PROCESS`. With a virtual-environment install, the launcher stub has no console, so the real interpreter it starts allocates a new visible one, and closing that window kills the server.
+- **Fix.** Spawn it with `CREATE_NO_WINDOW`. Submitted upstream as [open-jarvis/OpenJarvis#1120](https://github.com/open-jarvis/OpenJarvis/pull/1120).
+- **Verified.** Reproduced by inspecting the process tree (a visible console host with one flag, none with the other). The new test fails on the old code and passes on the new, and every CI check passes, including Windows. *Status: waiting for a maintainer's review; it has not been merged.*
+
+### 6. Voice stopping when the window was covered
+
+- **Cause (likely).** The embedded Chromium (WebView2) freezes timers and audio in a covered or minimized window, and the voice loop lives in that page.
+- **Fix.** Background throttling and occlusion detection are disabled when the window is created. *Applied, but not verified in isolation.*
+
+### Still open
+
+- A server process disappeared once, right after starting, with no error. It was not reproduced.
+- The server advertises `gemini-2.5-pro` as its default model, which Google no longer offers to new accounts. The interface picks `gemini-3.5-flash-lite`, so the app is unaffected, but an API call without a model would get a 404.
+- About 40 tests inherited from OpenJarvis fail on Windows for reasons unrelated to this project (36 in `tests/agents`, 3 in the speech and server suites).
+- `/v1/models` returns an empty list on purpose: cloud models are listed in their own tab.
 
 ## How it works
 
