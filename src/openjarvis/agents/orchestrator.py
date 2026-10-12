@@ -19,7 +19,7 @@ import os
 import re
 from typing import Any, Callable, List, Optional
 
-from openjarvis.agents import tool_router
+from openjarvis.agents import action_guard, tool_router
 from openjarvis.agents._stubs import AgentContext, AgentResult, ToolUsingAgent
 from openjarvis.core.events import EventBus
 from openjarvis.core.registry import AgentRegistry
@@ -372,8 +372,8 @@ class OrchestratorAgent(ToolUsingAgent):
             system_prompt=self._system_prompt,
         )
 
-        # Get OpenAI-format tool definitions. Only the ones this request can need are sent
-        # (see tool_router): all of them cost ~12k tokens on every single request.
+        # Get OpenAI-format tool definitions. Only the ones this request can need
+        # are sent (see tool_router): all of them cost ~12k tokens on every request.
         all_openai_tools = self._executor.get_openai_tools() if self._tools else []
         routed = (
             len(all_openai_tools) > tool_router.MIN_TOOLS_TO_ROUTE
@@ -386,6 +386,7 @@ class OrchestratorAgent(ToolUsingAgent):
         turns = 0
         total_prompt_tokens = 0
         total_completion_tokens = 0
+        claim_retry_used = False
 
         for _turn in range(self._max_turns):
             turns += 1
@@ -412,6 +413,24 @@ class OrchestratorAgent(ToolUsingAgent):
 
             # No tool calls -> check continuation, then final answer
             if not raw_tool_calls:
+                # The model says it did something but ran no tool this turn (it is
+                # copying its own earlier replies): send it back once to call the tool.
+                if (
+                    not claim_retry_used
+                    and not all_tool_results
+                    and all_openai_tools
+                    and action_guard.claims_unperformed_action(input, content)
+                ):
+                    claim_retry_used = True
+                    logger.warning(
+                        "Reply claims an action but no tool ran; retrying once: %r",
+                        content[:80],
+                    )
+                    messages.append(Message(role=Role.ASSISTANT, content=content))
+                    messages.append(
+                        Message(role=Role.USER, content=action_guard.NO_TOOL_NUDGE)
+                    )
+                    continue
                 content = self._check_continuation(result, messages)
                 content = self._strip_think_tags(content)
                 self._emit_turn_end(turns=turns, content_length=len(content))
@@ -461,13 +480,16 @@ class OrchestratorAgent(ToolUsingAgent):
                             role=Role.TOOL,
                             content=(
                                 "Tools loaded: " + ", ".join(sorted(loaded))
-                                if loaded else "No such group; nothing loaded."
+                                if loaded
+                                else "No such group; nothing loaded."
                             ),
                             tool_call_id=tc.id,
                             name=tc.name,
                         )
                     )
-                tool_calls = [tc for tc in tool_calls if tc.name != tool_router.MORE_TOOLS]
+                tool_calls = [
+                    tc for tc in tool_calls if tc.name != tool_router.MORE_TOOLS
+                ]
                 if not tool_calls:
                     continue
 

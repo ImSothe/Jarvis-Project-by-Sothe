@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CALL_HISTORY_MESSAGES,
+  JARVIS_CALL_PERSONA,
+  trimCallHistory,
   isNameOnly,
   isNoiseTranscript,
   isSilenceReply,
@@ -8,6 +11,40 @@ import {
   mentionsJarvis,
   startsWithJarvis,
 } from './useCallMode';
+
+describe('trimCallHistory', () => {
+  const chat = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` }));
+
+  it('keeps a short conversation untouched', () => {
+    const msgs = chat(5);
+    expect(trimCallHistory(msgs)).toEqual(msgs);
+  });
+
+  it('keeps only the last few messages of a long one, always ending on the newest', () => {
+    const msgs = chat(41); // user, assistant, ... user (the new request)
+    const out = trimCallHistory(msgs);
+    expect(out.length).toBeLessThanOrEqual(CALL_HISTORY_MESSAGES);
+    expect(out[out.length - 1]).toEqual(msgs[msgs.length - 1]);
+  });
+
+  it('never starts with an assistant reply', () => {
+    const msgs = chat(40); // ends on an assistant message, so a plain slice would start on one
+    expect(trimCallHistory(msgs)[0].role).toBe('user');
+  });
+
+  it('does not loop forever or empty the list when there is no user message', () => {
+    const only = [{ role: 'assistant', content: 'hola' }];
+    expect(trimCallHistory(only)).toEqual(only);
+  });
+});
+
+describe('call prompt', () => {
+  it('forbids claiming an action that no tool performed', () => {
+    expect(JARVIS_CALL_PERSONA).toMatch(/nunca digas que has hecho algo/i);
+    expect(JARVIS_CALL_PERSONA).toMatch(/herramienta/i);
+  });
+});
 
 describe('isNoiseTranscript', () => {
   it.each([

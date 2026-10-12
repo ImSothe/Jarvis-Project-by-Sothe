@@ -15,7 +15,7 @@ import { MicButton } from './MicButton';
 import { JarvisCore } from './JarvisCore';
 import { useSpeech } from '../../hooks/useSpeech';
 import { useWakeWord } from '../../hooks/useWakeWord';
-import { useCallMode, JARVIS_CALL_PERSONA } from '../../hooks/useCallMode';
+import { useCallMode, JARVIS_CALL_PERSONA, trimCallHistory } from '../../hooks/useCallMode';
 import { useTtsStore } from '../../lib/tts';
 import { useCallStore } from '../../lib/call';
 
@@ -214,11 +214,15 @@ export function InputArea() {
 
     // Build API messages before adding assistant placeholder
     const currentMessages = useAppStore.getState().messages;
-    const apiMessages: { role: 'system' | 'user' | 'assistant'; content: string; name?: string }[] =
+    let apiMessages: { role: 'system' | 'user' | 'assistant'; content: string; name?: string }[] =
       currentMessages.map((m) => ({
         role: m.role,
         content: m.content,
       }));
+    // Voice turns are mostly one-off commands. Sending the whole conversation every time makes
+    // each request pricier and, worse, the model starts imitating its own earlier replies
+    // ("Spotify pausado") instead of calling the tool. In call mode keep only the last few messages.
+    if (opts?.systemPrompt) apiMessages = trimCallHistory(apiMessages);
     // Call mode prepends a persona instruction for just this request — it's
     // never added to the visible transcript, so a normal typed/spoken
     // message right after a call still gets the default assistant voice.

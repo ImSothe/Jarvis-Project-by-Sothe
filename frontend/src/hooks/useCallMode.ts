@@ -217,7 +217,22 @@ export const JARVIS_CALL_PERSONA =
   'directas, sin listas, markdown ni símbolos, de forma que suene natural al ' +
   'leerlo en voz alta. Mantén tu personalidad y tus reglas habituales: eres ' +
   'un colega que tutea, nunca un mayordomo; no uses «señor», «usted» ni ' +
-  'ningún trato formal.';
+  'ningún trato formal. ' +
+  // Without this the model copies its own earlier replies ("Spotify pausado") instead of acting.
+  'Regla innegociable: nunca digas que has hecho algo (pausar, poner música, abrir una ' +
+  'app, subir el volumen...) si en ESTE turno no has llamado a la herramienta y ha ' +
+  'confirmado el resultado. Una orden nueva se ejecuta siempre llamando a la ' +
+  'herramienta, aunque ya hayas hecho lo mismo antes en la conversación.';
+
+/** How many past messages a voice turn carries (4 exchanges). Voice turns are mostly one-off commands. */
+export const CALL_HISTORY_MESSAGES = 8;
+
+/** The last few messages, starting at a user message (some APIs reject a leading reply). */
+export function trimCallHistory<T extends { role: string }>(messages: T[]): T[] {
+  const recent = messages.slice(-CALL_HISTORY_MESSAGES);
+  while (recent.length > 1 && recent[0].role !== 'user') recent.shift();
+  return recent;
+}
 
 function rms(data: Uint8Array): number {
   let sum = 0;
