@@ -14,13 +14,15 @@ import { transcribeAudio } from '../lib/api';
 // 7s with "nothing heard", which looks identical to the call being stuck).
 const SPEECH_RMS_THRESHOLD = 0.035;
 const SILENCE_RMS_THRESHOLD = 0.03;
-// People pause after saying the name or when they start thinking, so wait longer
-// when little has been said so far, and less once the sentence is under way.
-const SILENCE_HOLD_MS = 800;
-const SILENCE_HOLD_SHORT_MS = 1100;
+// People pause after saying the name or when they stop to think, so a silence only ends
+// the sentence after 2.2 s: a 2 s pause in the middle of a request must not cut it. The
+// price is ~1.4 s more before Jarvis starts answering (it used to wait 0.8-1.1 s).
+// Press Space to send immediately.
+const SILENCE_HOLD_MS = 2200;
+const SILENCE_HOLD_SHORT_MS = 2200;
 const SHORT_UTTERANCE_MS = 1800;
 const STARTUP_SILENCE_MS = 7000;
-const MAX_TURN_MS = 15000;
+const MAX_TURN_MS = 20000;
 const NOISE_FLOOR_CALIBRATION_MS = 400;
 // Noise rejection. A real utterance needs sustained voice, not a click.
 const MIN_VOICED_MS = 250;
