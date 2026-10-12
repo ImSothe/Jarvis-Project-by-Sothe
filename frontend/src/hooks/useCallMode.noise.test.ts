@@ -38,13 +38,17 @@ describe('mentionsJarvis', () => {
   it.each([
     'Jarvis abre Spotify', 'oye jarvis, dime algo', 'Yarvis pon música', 'harvis', 'Jarbis, qué hora es',
     'Jarvi dame un guion', 'JARVIS', 'vale Jarvis.', 'Járvis',
+    // anything that sounds like it
+    'Jarcis pon música', 'Travis abre Discord', 'Martis, dime la hora', 'Marvis y su amigo', 'Cervis', 'Servis sube el volumen',
+    'Harvey', 'Garbis', 'Jarves',
   ])('hears the name in %j', (text) => {
     expect(mentionsJarvis(text)).toBe(true);
   });
 
   it.each([
-    'esto es un reel de moda', 'hola, qué tal', 'mira este vídeo del árbol', 'Marvis y su amigo', 'abre Spotify',
+    'esto es un reel de moda', 'hola, qué tal', 'mira este vídeo del árbol', 'abre Spotify',
     'en esta parte del tutorial vamos a ver', 'no te olvides de suscribirte', 'garbanzos',
+    'el martes quedamos', 'las partes del informe', 'Carlos dime algo',
   ])('does not hear the name in %j', (text) => {
     expect(mentionsJarvis(text)).toBe(false);
   });

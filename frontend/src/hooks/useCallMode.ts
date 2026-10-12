@@ -63,8 +63,12 @@ export function isNoiseTranscript(text: string): boolean {
 // ("Jarvis" ... "ponme Residente"), the next utterance within PENDING_NAME_MS is
 // read as the rest of that same sentence.
 const PENDING_NAME_MS = 4000;
-// Speech-to-text mangles the name: jarvis, yarvis, harvis, jarbis, jarvi...
-const NAME_RE = /\b(?:j|y|h|g|ch)?[aá]r[vb](?:[iíy]s?|[iíy]z|[iíy])\b/i;
+// Speech-to-text mangles the name, so accept anything that sounds like it: jarvis, yarvis,
+// harvis, jarbis, jarcis, martis, garbis, jarvi, harvey, jarves, plus the letter-swapped
+// travis, cervis and servis. Ordinary words (parte, martes) must not match: they end in
+// -e / -es, not -is / -iz / -y.
+const NAME_RE =
+  /\b(?:[a-zñ]{0,3}[aá]r[bcdfgjklmnpqstvwxyz]{1,2}[iíy]{1,2}[sz]?|[a-zñ]{0,3}[aá]r[vb]e[syz]?|t?r[aá][vb][iíy][sz]|[a-zñ]{0,2}[eé]r[vb][iíy][sz])\b/i;
 
 export function mentionsJarvis(text: string): boolean {
   return NAME_RE.test(text);
