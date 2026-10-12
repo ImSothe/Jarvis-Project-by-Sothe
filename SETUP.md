@@ -334,7 +334,10 @@ YOUTUBE_API_KEY=                      # viral videos
 GEMINI_TTS_STYLE=                     # voice acting direction (optional)
 FFMPEG_PATH=                          # only if ffmpeg is not found
 SOTHE_OPTIMIZER_DIR=                  # only for optimizer_info
+JARVIS_ENGINES=                       # engines checked at startup. Default: cloud,nim (see below)
 ```
+
+`JARVIS_ENGINES` keeps startup fast: every local AI engine that is not installed (Ollama, vLLM, LM Studio...) costs about 4 seconds of timeout each time Jarvis starts. The launcher defaults it to `cloud,nim`, which is what you need with a Gemini key. **If you run a local engine, set it in `.env`**, for example `JARVIS_ENGINES=ollama,cloud`.
 
 ## 9. Check that it works
 

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from openjarvis.core.config import JarvisConfig
 from openjarvis.core.registry import EngineRegistry
@@ -119,12 +120,26 @@ def _maybe_register_mining_sidecar_engine() -> None:
     EngineRegistry.register_value("vllm-pearl-mining", _cls)
 
 
+def _engine_allowlist() -> Optional[Set[str]]:
+    """Engines to probe, from ``JARVIS_ENGINES`` (comma-separated), or ``None`` for all.
+
+    Every local engine that is not installed (Ollama, vLLM, LM Studio...) costs a
+    ~4 s timeout on Windows each time the server starts. Setting e.g.
+    ``JARVIS_ENGINES=cloud,nim`` skips the ones you do not use.
+    """
+    raw = os.environ.get("JARVIS_ENGINES", "")
+    allowed = {k.strip() for k in raw.split(",") if k.strip()}
+    return allowed or None
+
+
 def discover_engines(config: JarvisConfig) -> List[Tuple[str, InferenceEngine]]:
     """Probe registered engines and return ``[(key, instance)]`` for healthy ones.
 
-    Results are sorted with the config default engine first.
+    Results are sorted with the config default engine first. If ``JARVIS_ENGINES``
+    is set, only those engines are probed.
     """
     _maybe_register_mining_sidecar_engine()
+    allowed = _engine_allowlist()
 
     # Probe engines concurrently: each health() does a blocking network
     # check with its own timeout, so a serial loop costs the SUM of all
@@ -132,7 +147,7 @@ def discover_engines(config: JarvisConfig) -> List[Tuple[str, InferenceEngine]]:
     # threads collapses that to roughly the slowest single probe. The
     # healthy.sort() below normalizes order, so completion order is
     # irrelevant and the result is identical to the serial version (#263).
-    keys = list(EngineRegistry.keys())
+    keys = [k for k in EngineRegistry.keys() if allowed is None or k in allowed]
 
     def _probe(key: str) -> Tuple[str, InferenceEngine] | None:
         try:
@@ -217,7 +232,14 @@ def get_engine(
 
     default_key = config.engine.default
     default_is_cloud: bool | None = None
-    if default_key and EngineRegistry.contains(default_key):
+    allowed = _engine_allowlist()
+    if allowed is not None and default_key not in allowed:
+        # Not one of the engines the user chose to use: do not spend a timeout on it.
+        logger.debug(
+            "Default engine %r is not in JARVIS_ENGINES; skipping its probe",
+            default_key,
+        )
+    elif default_key and EngineRegistry.contains(default_key):
         default_cls = EngineRegistry.get(default_key)
         default_is_cloud = bool(getattr(default_cls, "is_cloud", False))
         try:

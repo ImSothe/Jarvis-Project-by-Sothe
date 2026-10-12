@@ -20,6 +20,11 @@ if (-not $env:GEMINI_API_KEY) {
     Write-Host 'GEMINI_API_KEY is empty in .env' -ForegroundColor Yellow
 }
 
+# Only probe the engines this setup uses. Every local engine that is not installed (Ollama,
+# vLLM, LM Studio...) costs a ~4 s timeout at startup, ~12 s in total. If you run a local
+# engine, set JARVIS_ENGINES yourself in .env (e.g. JARVIS_ENGINES=ollama,cloud) or remove this.
+if (-not $env:JARVIS_ENGINES) { $env:JARVIS_ENGINES = 'cloud,nim' }
+
 # --- Bootstrap (native tools print progress to stderr; that must not be fatal here) ---
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'

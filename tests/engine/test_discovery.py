@@ -151,6 +151,75 @@ class TestLiteLLMDiscovery:
         assert engine.list_models() == ["groq/llama-3.3-70b-versatile"]
 
 
+class TestEngineAllowlist:
+    """JARVIS_ENGINES limits which engines are probed (a dead one costs a timeout)."""
+
+    def test_only_allowed_engines_are_probed(self, monkeypatch) -> None:
+        _reg("keep", "keep")
+        _reg("skip", "skip")
+        probed: list = []
+
+        def _make(k, c):  # noqa: ANN001
+            probed.append(k)
+            return _FakeEngine(healthy=True)
+
+        monkeypatch.setenv("JARVIS_ENGINES", "keep")
+        with mock.patch("openjarvis.engine._discovery._make_engine", side_effect=_make):
+            result = discover_engines(JarvisConfig())
+        assert probed == ["keep"]
+        assert [k for k, _ in result] == ["keep"]
+
+    def test_allowlist_accepts_spaces_and_several_keys(self, monkeypatch) -> None:
+        _reg("a", "a")
+        _reg("b", "b")
+        _reg("c", "c")
+        monkeypatch.setenv("JARVIS_ENGINES", " a , c ")
+        with mock.patch(
+            "openjarvis.engine._discovery._make_engine",
+            side_effect=lambda k, c: _FakeEngine(healthy=True),
+        ):
+            result = discover_engines(JarvisConfig())
+        assert sorted(k for k, _ in result) == ["a", "c"]
+
+    def test_without_the_variable_every_engine_is_probed(self, monkeypatch) -> None:
+        _reg("x", "x")
+        _reg("y", "y")
+        monkeypatch.delenv("JARVIS_ENGINES", raising=False)
+        with mock.patch(
+            "openjarvis.engine._discovery._make_engine",
+            side_effect=lambda k, c: _FakeEngine(healthy=True),
+        ):
+            result = discover_engines(JarvisConfig())
+        assert sorted(k for k, _ in result) == ["x", "y"]
+
+    def test_default_engine_outside_the_list_is_not_probed(self, monkeypatch) -> None:
+        _reg("dead", "dead")
+        _reg("good", "good")
+        probed: list = []
+
+        def _make(k, c):  # noqa: ANN001
+            probed.append(k)
+            return _FakeEngine(healthy=(k == "good"))
+
+        cfg = JarvisConfig()
+        cfg.engine.default = "dead"
+        monkeypatch.setenv("JARVIS_ENGINES", "good")
+        with mock.patch("openjarvis.engine._discovery._make_engine", side_effect=_make):
+            result = get_engine(cfg)
+        assert result is not None and result[0] == "good"
+        assert "dead" not in probed
+
+    def test_explicit_engine_key_ignores_the_list(self, monkeypatch) -> None:
+        _reg("asked", "asked")
+        monkeypatch.setenv("JARVIS_ENGINES", "other")
+        with mock.patch(
+            "openjarvis.engine._discovery._make_engine",
+            side_effect=lambda k, c: _FakeEngine(healthy=True),
+        ):
+            result = get_engine(JarvisConfig(), "asked")
+        assert result is not None and result[0] == "asked"
+
+
 class TestGetEngine:
     def test_fallback_when_default_unhealthy(self) -> None:
         _reg("bad", "bad")
